@@ -1,0 +1,120 @@
+head	1.1;
+access;
+symbols;
+locks
+	bgc:1.1; strict;
+comment	@// @;
+
+
+1.1
+date	2003.03.15.15.30.22;	author bgc;	state Exp;
+branches;
+next	;
+
+
+desc
+@@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@function rundpp(flag)
+
+list = '/d/bgc/data/dpp/alllist';
+
+global top fstrings fign
+
+    if nargin > 1  | nargin < 1 | strcmp(flag,'start')
+     fstrings = textread(list,'%s');
+%%     top = dialog('WindowStyle','normal');
+figure('Position', [100 100 200 200], 'Menubar', 'none',...
+       'NumberTitle', 'off', 'Tag','TopLevel','Name','DPP');
+     lst = uicontrol(gcf, 'Style','listbox','String',fstrings,...
+		'Callback', 'rundpp(''set''),','Tag','TheList',...
+		'Position',[20 20 170 90]);
+uicontrol(gcf,'Style', 'checkbox', 'Callback', 'rundpp(''smooth'')',...
+'String', 'Force Read', 'Tag', 'ReRead', 'Position', [20 130 90 20]);
+uicontrol(gcf,'style','pop','string','Pcolor|Phase1|Phase2|AC', ...
+		    'Callback', 'rundpp(''smooth'')', 'Tag','plottype',...
+		    'position',[20 150 50 20]);
+uicontrol(gcf,'Style', 'checkbox', 'Callback', 'rundpp(''smooth'')',...
+'String', 'Fit', 'Tag', 'ShowFit', 'Position', [70 150 50 20]);
+uicontrol(gcf,'Style', 'checkbox', 'Callback', 'rundpp(''shade'')',...
+'String', 'Shade', 'Tag', 'Shading', 'Position', [110 130 60 20]);
+uicontrol(gcf,'Style', 'pushbutton', 'Callback', 'rundpp(''next'')',...
+'String', 'Next', 'Position', [20 110 50 20]);
+uicontrol(gcf,'Style', 'pushbutton', 'Callback', 'rundpp(''prev'')',...
+'String', 'Prev', 'Position', [70 110 50 20]);
+uicontrol(gcf,'Style', 'pushbutton', 'Callback', 'rundpp(''close'')',...
+'String', 'Close', 'Position', [120 110 50 20]);
+fign = figure('Tag','Contours');
+elseif strcmp(flag,'next')
+     it = findobj('Tag','TheList');
+     n = get(it, 'value');
+     last = size(fstrings)
+     if n < last(1)
+       n = n+1;
+     set(it, 'value',n);
+     plotmember(n, fstrings);
+     end
+elseif strcmp(flag,'prev')
+     it = findobj( 'Tag','TheList');
+     n = get(it, 'value');
+     if(n > 1)
+     n = n-1;
+     set(it, 'value',n);
+     plotmember(n, fstrings);
+     end
+elseif strcmp(flag,'close')
+     it = findobj(gcf, 'Tag','TopLevel');
+     close(it);
+     it = findobj(gcf, 'Tag','Contours');
+     close(it);
+    else %clicked on line
+     it = findobj(gcf, 'Tag','TheList');
+     n = get(it, 'value'); 
+    plotmember(n, fstrings);
+end
+
+function plotmember(n, fstrings)
+
+file = fstrings(n);
+thefile = file{1};
+it = findobj('Tag','Contours');
+figure(it);
+reread = get(findobj( 'Tag','ReRead'),'value');
+acfile = strrep(thefile, '2grating','rds');
+acfile = strrep(acfile, 'DPP','OXAC');
+
+if ~exist(acfile)
+  acfile = strrep(acfile, 'rds','rls');
+  if ~exist(acfile)
+    acfile = strrep(thefile, '2grating','rds');
+    acfile = strrep(acfile, 'DPP','ODX');
+    if ~exist(acfile)
+      acfile = strrep(acfile, 'rds','rls');
+    end
+  end
+end
+    
+DPP = Read_DPP_data(thefile,reread);
+plottype = get(findobj('Tag','plottype'),'value');
+if plottype == 4 & exist(acfile)
+    hold on;
+    OXAC = Read_DPP_data(acfile,reread);
+    Plot_AC_data(OXAC);
+    hold on;
+end
+Plot_DPP_data(DPP,plottype);
+
+shade = get(findobj( 'Tag','Shading'),'value');
+if(shade)
+  shading('interp');
+else
+    shading('flat');
+end
+
+@

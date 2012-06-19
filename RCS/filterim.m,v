@@ -1,0 +1,351 @@
+head	1.4;
+access;
+symbols;
+locks
+	bgc:1.4; strict;
+comment	@// @;
+
+
+1.4
+date	2011.06.13.11.38.20;	author bgc;	state Exp;
+branches;
+next	1.3;
+
+1.3
+date	2007.06.29.10.48.02;	author bgc;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2007.06.25.20.27.30;	author bgc;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2005.07.26.20.47.27;	author bgc;	state Exp;
+branches;
+next	;
+
+
+desc
+@Orientation/SF bandpass filtered noise image maker
+@
+
+
+1.4
+log
+@sf > 4 was going to SFinf.  Now this needs sfsd >= 100
+@
+text
+@function nbuilt = filterim( sf, or, wi, varargin)
+
+%filterim( sf, or, rsd, varargin)
+% make SF/ori bandpass filtered image
+% sf(1) is peak, sf(2) is SD of Gaussian in frequency domain (cpd)
+% or(1) is peak orientaiton, or(2) is Gaussian sd.
+% rsd is a Gaussian envelope applied to the result.
+%
+%filterim( sf, or, rsd, 'save', dir) saved PGM images in dir
+%
+%filterim( sf, or, rsd, 'nseed', n), builds n images with different seeds.
+%
+%filterim( sf, or, rsd, 'imzise', s) maxes the images s x s pixels. [256]
+%
+%filterim( sf, or, rsd, 'deg2pix',x ) sets up the pixel size. 
+
+
+savedir = [];
+gamma = 0;
+nseed = 1;
+imsize = 256;
+pix2deg = 0.0292;
+seedoffset = 0;
+replace = 1;
+checkreplace = 0;
+version = '$Revision: 1.3 $';
+version = version(11:end-1); % just the numbber
+[err, host] = unix('hostname');
+quietmode = 0;
+nuilt = 0;
+savedir = [];
+getft = 0;
+plotim =1;
+j = 1;
+while j < nargin -2
+    if(strncmpi(varargin{j},'save',4))
+        j = j+1;
+        savedir = varargin{j};
+	mkpath([savedir '/']);
+    elseif(strncmpi(varargin{j},'checkreplace',4))
+        checkreplace = 1;
+    elseif(strncmpi(varargin{j},'getft',4))
+        getft = 1;
+    elseif(strncmpi(varargin{j},'nseed',4))
+        j = j+1;
+        nseed = varargin{j};
+    elseif(strncmpi(varargin{j},'noplot',4))
+        plotim = 0;
+    elseif(strncmpi(varargin{j},'imsize',4))
+        j = j+1;
+        imsize = varargin{j};
+    elseif(strncmpi(varargin{j},'deg2pix',4))
+        j = j+1;
+        pix2deg = varargin{j};
+    elseif(strncmpi(varargin{j},'pix2deg',4))
+        j = j+1;
+        pix2deg = varargin{j};
+    elseif(strncmpi(varargin{j},'quieter',6))
+        quietmode = 2;
+    elseif(strncmpi(varargin{j},'quiet',4))
+        quietmode = 1;
+    elseif(strncmpi(varargin{j},'gamma',4))
+        j = j+1;
+        gamma = varargin{j};
+    elseif(strncmpi(varargin{j},'noreplace',4))
+        replace = 0;
+    elseif(strncmpi(varargin{j},'seed',4))
+        j = j+1;
+        seedoffset = varargin{j};
+    end
+    j = j+1;
+end
+
+if checkreplace
+    propfile = [savedir '/paramlist'];
+    binocfile = [savedir '/lastused'];
+    a = dir(propfile);
+    b = dir(binocfile);
+    if ~isempty(a) & ~isempty(b) & b.datenum > a.datenum
+        replace = 1;
+        fprintf('Replacing %s\n',savedir);
+    else
+        replace = 0;
+    end
+end
+
+
+%Equivalent width of Gaussian is 2.5066 sigma
+rsd = wi/(2.5066 * pix2deg);
+center = 1+ (imsize/2);
+[x,y] = meshgrid(1:imsize,1:imsize);
+r = sqrt((x-center).^2 + (y-center).^2);
+envelope = exp(-(r.^2)/(2*rsd^2));
+angle = atan2(y-center,x-center);
+
+orpeak = (90 - or(1)) * pi/180;
+dangle = atan(tan(angle-orpeak));
+dangleb = dangle + pi;
+danglea = dangle -pi;
+danglec = dangle +pi*2;
+dangled = dangle -pi*2;
+orsd= or(2) * pi/180;
+sfsd = sf(2) * imsize * pix2deg;
+sfpeak = sf(1) * imsize * pix2deg;
+if(orsd > 0.7* pi)  %uniform ori is sd > 126 degrees (monkey can do 90!!)
+  filter = exp(-((r-sfpeak).^2)./(2 * sfsd^2));
+elseif sf(2) > 100 | isinf(sfpeak)  %All sfs  is sfsd > 100, before convert to pixels
+  orf = exp(-dangle.^2/(2 * orsd^2));
+  orfa = exp(-danglea.^2/(2 * orsd^2));
+  orfb = exp(-dangleb.^2/(2 * orsd^2));
+  orfc = exp(-danglec.^2/(2 * orsd^2));
+  orfd = exp(-dangled.^2/(2 * orsd^2));
+  orfall = (orf+orfb+orfa+orfc+orfd)./3;
+  orfall = orfall ./ max(orfall(:));
+  id = (find(r < 0.3));
+  filter = orfall ./(abs(r));
+  filter(id) = 0;
+  filter = orfall;
+else
+  orf = exp(-dangle.^2/(2 * orsd^2));
+  orfa = exp(-danglea.^2/(2 * orsd^2));
+  orfb = exp(-dangleb.^2/(2 * orsd^2));
+  orfc = exp(-danglec.^2/(2 * orsd^2));
+  orfd = exp(-dangled.^2/(2 * orsd^2));
+  orfall = (orf+orfb+orfa+orfc+orfd)./3;
+  orfall = orfall ./ max(orfall(:));
+  filter = exp(-((r-sfpeak).^2)./(2 * sfsd^2)) .* orfall;
+end
+
+% for some reason FTa .*FTb does not quite convolve, need FTa .*
+% fftshift(FTb), so do this by just NOT shifting the fitler....
+filter = fftshift(filter);
+
+    tic;
+    nbuilt = 0;
+    imsum = zeros(256);
+    fts = zeros([nseed 256 256]);
+for seed = 1:nseed
+    buildim = 1;
+    if ~isempty(savedir)
+        imname = sprintf('%s/se%d.pgm',savedir,seed);
+        if exist(imname,'file') && ~replace
+            if quietmode < 1
+                fprintf('%s exists\n',imname);
+            end
+            buildim = 0;
+        end
+    end
+    if buildim
+        rand('state',seed+seedoffset);
+        im = rand(256) - 0.5;
+        ft = fft2(im);
+        
+        ft = fftshift(ft).* filter;
+        im = real(ifft2(ft)) .* envelope;
+ %       im = real(ifft2(ft));
+        scale = 0.5/max(max(abs(im)));
+        im = 0.5 + im .* scale;
+        if gamma
+            im = im .^(1/gamma);
+        end
+        if ~isempty(savedir)
+            imwrite(im,sprintf('%s/se%d.pgm',savedir,seed),'PGM');
+        elseif plotim
+            figure(1);
+            subplot(1,2,1);
+            imagesc(abs(fftshift(ft)));
+            subplot(1,2,2);
+            imagesc(real(im));
+            colormap('gray');
+        end
+        imsum = imsum+abs(0.5-im);
+        nbuilt = nbuilt+1;
+        if getft
+            fts(nbuilt,:,:) = fft2(im-0.5);
+        end
+    end
+end
+if ~isempty(savedir) & nbuilt
+    fid = fopen(sprintf('%s/paramlist',savedir),'w');
+    if fid > 0
+        fprintf(fid,'Build at %s on %s\n',datestr(now),host);
+        fprintf(fid,'Version %s\n',version);
+        fprintf(fid,'SeedOffset %d\n',seedoffset);
+        fprintf(fid,'pix2deg %.4f\n',pix2deg);
+        fprintf(fid,'sf %.4f sd %.4f\n',sf(1),sf(2));
+        fprintf(fid,'or %.2f sd %.2f\n',or(1),or(2));
+        fprintf(fid,'gamma %.2f\n',gamma);
+        fprintf(fid,'imsz %.0f sd %.2f\n',imsize,wi/2.5066);
+        fclose(fid);
+    end
+end
+if nbuilt >1 | quietmode < 2
+fprintf('Took %.3f for %s (%d new images)\n',toc,savedir,nbuilt);
+end
+
+if getft
+    nbuilt = fts;
+end@
+
+
+1.3
+log
+@"wrapping" was faulty. fixed.
+@
+text
+@d1 1
+a1 1
+function filterim( sf, or, wi, varargin)
+d25 2
+a26 1
+version = '$Revision: 1.2 $';
+d28 6
+a33 1
+
+d40 4
+d47 2
+d54 8
+a61 1
+        deg2pix = varargin{j};
+d74 12
+a85 1
+
+d107 12
+d129 3
+a133 14
+if ~isempty(savedir)
+    fid = fopen(sprintf('%s/paramlist',savedir),'w');
+    if fid > 0
+        fprintf(fid,'Build at %s\n',datestr(now));
+        fprintf(fid,'Version %s\n',version);
+        fprintf(fid,'SeedOffset %d\n',seedoffset);
+        fprintf(fid,'pix2deg %.4f\n',pix2deg);
+        fprintf(fid,'sf %.4f sd %.4f\n',sf(1),sf(2));
+        fprintf(fid,'or %.2f sd %.2f\n',or(1),or(2));
+        fprintf(fid,'gamma %.2f\n',gamma);
+        fprintf(fid,'imsz %.0f sd %.2f\n',imsize,wi/2.5066);
+        fclose(fid);
+    end
+end
+d135 3
+d143 3
+a145 1
+            fprintf('%s exists\n',imname);
+d154 3
+a156 2
+        ft = ft.* filter;
+        im = ifft2(ft) .* envelope;
+d164 1
+a164 1
+        else
+d172 5
+d179 21
+a199 1
+fprintf('Took %.3f for %s\n',toc,savedir);@
+
+
+1.2
+log
+@Gaussian now wrapped 5 laps (2 extra each way)
+@
+text
+@d25 2
+a26 1
+version = '$Revision: 1.1 $';
+d70 2
+a71 2
+danglec = dangle -pi;
+dangled = dangle -pi;
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d19 1
+d24 2
+a25 1
+version = '$Revision: 1.0 $';
+d32 1
+d42 8
+d54 3
+d67 4
+d74 12
+a85 1
+filter = exp(-((r-sfpeak).^2)./(2 * sfsd^2)) .* exp(-dangle.^2/(2 * orsd^2));
+d97 1
+d104 1
+a104 8
+    rand('state',seed+seedoffset);
+    im = rand(256) - 0.5;
+    ft = fft2(im);
+    
+    ft = ft.* filter;
+    im = ifft2(ft) .* envelope;
+    scale = 0.5/max(max(abs(im)));
+    im = 0.5 + im .* scale;
+d106 28
+a133 8
+        imwrite(im,sprintf('%s/se%d.pgm',savedir,seed),'PGM');
+    else
+        figure(1);
+        subplot(1,2,1);
+        imagesc(abs(fftshift(ft)));
+        subplot(1,2,2);
+        imagesc(real(im));
+        colormap('gray');
+d136 1
+a136 1
+toc;@

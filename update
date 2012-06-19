@@ -1,0 +1,9 @@
+#!/bin/sh
+ci $1
+echo "Checked in current release version\n"
+co -l $1
+cp dev/$1 .
+#check it back in so that comment can be up to date
+ci $1
+#check back out read only to avoid accidental edits.
+co $1

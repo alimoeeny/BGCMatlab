@@ -1,0 +1,13 @@
+*.mat
+*.m~
+*.asv
+*~
+*#
+*.dat
+*.zip
+*.docx
+*.doc
+._*
+$*
+Thumbs.db
+.DS_Store

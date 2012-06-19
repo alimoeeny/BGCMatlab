@@ -1,0 +1,192 @@
+head	1.3;
+access;
+symbols;
+locks
+	bgc:1.3; strict;
+comment	@// @;
+
+
+1.3
+date	2002.02.07.09.12.14;	author bgc;	state Exp;
+branches;
+next	1.2;
+
+1.2
+date	2002.01.10.15.07.15;	author bgc;	state Exp;
+branches;
+next	1.1;
+
+1.1
+date	2002.01.09.13.33.59;	author bgc;	state Exp;
+branches;
+next	;
+
+
+desc
+@One orthogonal RF
+@
+
+
+1.3
+log
+@as it was in the first draft
+@
+text
+@function r = vhocorr()
+%Makes 2d Gabor patch and performs 2d cross-correlation
+%in the Fourier domain..
+
+xsize = 100;
+ysize = 100;
+
+
+%Gabor Parameters.
+%1  horz offset
+%2  vert offset
+%3  frequency in cpd.
+%4  phase relative to mean position
+%5  orientation clockwise from horizontal
+%6  sd perpendicular to bars
+%7  sd parallel to bars
+%8  peak amplitude
+%9  mean 
+
+sf = 1.3;
+sdh = 0.25;
+sdv = 0.25;
+
+asymfilter =  [0 0 sf 0    -45 sdh sdv 0.5 0.0];%defines params for this Gabor
+afiltershape = GFilter2 (xsize,ysize,asymfilter);%routine to create Gabor
+afiltershape = afiltershape -mean(mean(afiltershape));
+
+%fhandle = figure; %create new figure
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+afourtr = fft2 (afiltershape);	%2d fast fourier transform
+ot = abs(fftshift(afourtr));
+fourtr_ccorr = afourtr.*conj(afourtr);
+aucorr = ifft2 (fourtr_ccorr);		%inverse fft
+aucorr = real (aucorr);			%sometimes v.small complex 
+					%parts left from roundoff
+aucorr = fftshift (aucorr);		%shift so zero displacement
+                                        %is
+imagesc(aucorr);			%draw auto correlation
+axis('square');
+colormap('hot');
+
+set(gca,'fontsize',18);
+set(gca,'Ytick',[]);
+set(gca,'Xtick',[]);
+
+arr = arrow([50 50], [100 100]);
+set(arr,'EdgeColor','c','FaceColor','c');
+arr = arrow([0 100], [50 50]);
+set(arr,'EdgeColor','c','FaceColor','c');
+text(55,61,'Orthogonal Disparity','Rotation', -45, 'fontsize', 18,'color','c');
+text(7,99,'Parallel Disparity','Rotation', 45, 'fontsize', 18,'color','c');
+xlabel('Horizontal Disparity');
+ylabel('Vertical Disparity');
+
+
+x = 1:xsize;
+y = 1:ysize;
+[x2d,y2d]=meshgrid(x,y);
+
+angles = [];
+resps = [];
+freq= sf * 100/pi;
+freq = sf * pi/100;
+for angle=[0:0.1:pi]
+  xprime = x2d.*  cos(angle) - y2d.*sin(angle);
+  grating = exp(2* i *  pi* freq .* xprime);
+  resp = abs(sum(sum(grating.*afiltershape)));
+  angles = [angles angle];
+  resps = [resps resp];
+end
+angles = angles - pi;
+resps = resps .^2 .* 0.01;
+[xx, yy] = pol2cart(angles, resps);
+hold on;
+plot(xx +50,yy +50,'linewidth',2);
+hold off;
+
+
+
+
+
+
+
+
+
+@
+
+
+1.2
+log
+@with arrows
+@
+text
+@d20 1
+a20 1
+sf = 1.5;
+a24 6
+hsymfilter =  [0 0 sf 0    90 sdh sdv 0.5 0.0];	
+vsymfilter =  [0 0 sf 0    0 sdh sdv 0.5 0.0];	
+bsymfilter =  [0.176 0 sf 0    45 sdh sdv 0.5 0.0];
+csymfilter =  [0 0 sf -1.57    45 sdh sdv 0.5 0.0];
+barsymfilter =  [0 0 sf -1.57    45 sdh 20 0.5 0.0];
+barasymfilter =  [0 0 sf 0    45 sdh 20 0.5 0.0];
+d27 2
+a28 13
+bfiltershape = GFilter2 (xsize,ysize,bsymfilter);
+bfiltershape = bfiltershape -mean(mean(bfiltershape));
+cfiltershape = GFilter2 (xsize,ysize,csymfilter);
+cfiltershape = cfiltershape -mean(mean(cfiltershape));
+hfiltershape = GFilter2 (xsize,ysize,hsymfilter);
+hfiltershape = hfiltershape -mean(mean(hfiltershape));
+vfiltershape = GFilter2 (xsize,ysize,vsymfilter);
+vfiltershape = vfiltershape -mean(mean(vfiltershape));
+barfiltershape = GFilter2 (xsize*2,ysize*2,barsymfilter);
+barfiltershape = barfiltershape -mean(mean(barfiltershape));
+abarfiltershape = GFilter2 (xsize*2,ysize*2,barasymfilter);
+abarfiltershape = abarfiltershape -mean(mean(abarfiltershape));
+fhandle = figure; %create new figure
+d33 1
+a33 14
+hfourtr = fft2 (hfiltershape);	%2d fast fourier transform
+vfourtr = fft2 (vfiltershape);	%2d fast fourier transform
+bfourtr = fft2 (bfiltershape);	%2d fast fourier transform
+cfourtr = fft2 (cfiltershape);	%2d fast fourier transform
+ofourtr = fft2 (barfiltershape);	%2d fast fourier transform
+oafourtr = fft2 (abarfiltershape);	%2d fast fourier transform
+
+
+fourtr_ccorr = vfourtr.*conj(vfourtr);
+aucorr = ifft2 (fourtr_ccorr);		%inverse fft
+aucorr = real (aucorr);			%sometimes v.small complex 
+					%parts left from roundoff
+aucorr = fftshift (aucorr);		%shift so zero displacement is
+
+d38 4
+a41 2
+aucorr = fftshift (aucorr);		%shift so zero displacement is
+draw (aucorr,-99,-99);			%draw auto correlation
+d43 1
+d50 1
+a50 1
+arr = arrow([50 50], [100 0]);
+d53 1
+a53 1
+text(60,34,'Parallel Disparity','Rotation', 45, 'fontsize', 18,'color','c');
+d56 24
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@d75 6
+@

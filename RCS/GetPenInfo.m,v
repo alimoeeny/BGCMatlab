@@ -1,0 +1,41 @@
+head	1.1;
+access;
+symbols;
+locks
+	bgc:1.1; strict;
+comment	@// @;
+
+
+1.1
+date	2011.03.14.21.08.51;	author bgc;	state Exp;
+branches;
+next	;
+
+
+desc
+@extracts hemisphere, electrode type, tube depth strings from text channel
+@
+
+
+1.1
+log
+@Initial revision
+@
+text
+@function txt = GetPenInfo(T, varargin)
+
+rid = strmatch('Right',T.text);
+eid = strmatch('Electrode',T.text);
+
+if isempty(eid) && isempty(rid)
+    txt = 'No Pen info in File';
+    return;
+end
+
+if length(eid) && length(rid)
+    txt = sprintf('%s %s',deblank(T.text(rid(end),:)),deblank(T.text(eid(end),:)));
+elseif length(rid)
+    txt = deblank(T.text(rid(end),:));
+elseif length(eid)
+    txt = deblank(T.text(rid(end),:));    
+end@
