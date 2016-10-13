@@ -1,25 +1,35 @@
-function [para res] = Fit_Gabor_2_AC_Group(x,y1,y2,varargin)
+function [para res details] = Fit_Gabor_2_AC_Group(x,y1,y2,varargin)
 
-% function para = Fit_Gabor(x,y,init)
+% function [para, residual, details] = FitACGabors(dx,corr,acorr, [ndata])
 % para = [offset amp1 freq phase1 disp var amp2 phase2]
 %           1      2    3    4      5   6    7    8
 % init and n_data are optional
+%Fits contstrained pair of Gabors to Corr/ACorr data
+% FitACGabors(dx,corr,acorr, 'debug') plots results along the way
+% FitACGabors(dx,corr,acorr, 'guess', params) sets starting conditiongs.
+%                                          params must be an 8 element vector
+%FitACGabors(dx,params,'eval') evaluates a fit over the values given in dx
 
 DEBUG=0; % 0 for no output, 1 for debugging output (figures)
 
 DISP='off'; % 'final' for some, 'iter' for lots of output of lsqcurvefit (text)
-
-
+plotfit = 0;
  n_data=1;
  j = 1;
- while j <= nargin-3
+ j = 1;
+ while j <= length(varargin)
      vg = varargin{j};
      if isnumeric(varargin{j})
          ndata = varargin{j};
+     elseif strncmp(vg,'debug',4)
+         DEBUG = 1;
+     elseif strncmp(vg,'guess',4)
          j = j+1;
+         init = varargin{j};
      end
      j = j+1;
  end
+details.n_data = n_data;
 
      
 
@@ -28,7 +38,8 @@ n=length(x);
 x=reshape(x,1,n);
 if ischar(y2) % evaluate a fit, at x
     para = Gabor_2_AC(ones(size([x x])));
-  para = Gabor_2_AC(y1,x);
+  a = Gabor_2_AC(y1,x);
+  para = reshape(a,length(x),2);
   return;
 end
 
@@ -51,6 +62,7 @@ mf=n*nf/2;
 % initial guess for parameters
 if nargin<5 | length(init)~=8
     % baseline guess
+    xid = find(abs(x) < 1000); %UC is x = 1000. Don't use that X val
     init(1)=mean([y1(1) y1(2) mean(y1) y1(n-1) y1(n)...
                   y2(1) y2(2) mean(y2) y2(n-1) y2(n)]);
     % amplitude guess
@@ -63,15 +75,16 @@ if nargin<5 | length(init)~=8
     yf2=fft(y22);
     [dummy idx1]=max(abs(yf1(2:n)));
     [dummy idx2]=max(abs(yf2(2:n)));
-    init(3)=mean([idx1 idx2])*2*pi/(max(x)-min(x));
-    init(4)=-angle(yf1(idx1+1));
-    init(8)=-angle(yf2(idx2+1));
+    init(3)=mean([idx1 idx2])*2*pi/(max(x(xid))-min(x(xid)));
+%bgc. INitial guess seems wrong sign for lemM316 cell1.  now its pi-angle, was just -angle    
+    init(4)=pi-angle(yf1(idx1+1));
+    init(8)=pi-angle(yf2(idx2+1));
     % gaussian center guess
-    init(5)=mean([mean(x.*abs(y1-init(1)))/mean(abs(y1-init(1))) ...
-                  mean(x.*abs(y2-init(1)))/mean(abs(y2-init(1)))]);
+    init(5)=mean([mean(x(xid).*abs(y1(xid)-init(1)))/mean(abs(y1(xid)-init(1))) ...
+                  mean(x(xid).*abs(y2(xid)-init(1)))/mean(abs(y2(xid)-init(1)))]);
     % gaussian width guess
-    init(6)=0.5*mean([mean(x.^2.*abs(y1-init(1)))/mean(abs(y1-init(1))) ...
-                      mean(x.^2.*abs(y2-init(1)))/mean(abs(y2-init(1)))]);
+    init(6)=0.5*mean([mean(x(xid).^2.*abs(y1(xid)-init(1)))/mean(abs(y1(xid)-init(1))) ...
+                      mean(x(xid).^2.*abs(y2(xid)-init(1)))/mean(abs(y2(xid)-init(1)))]);
 end
     
 % initial guess for lower and upper bounds
@@ -93,6 +106,7 @@ lb(6)=0.25*(x(2)-x(1))^2;
 ub(6)=x(n)-x(1);
 
 if DEBUG 
+    disp('              Base           Amp          F         Phase     PosDisp         SD          ACamp        ACPhase');
     Debugging_Info('1',init);
 end
 
@@ -100,17 +114,21 @@ end
 
 para1=init;
 options=optimset('MaxIter',50,'TolFun',0.02,'Display',DISP);
+if std(y1) == 0 && std(y2) == 0
+    details = AddError(details,'-show','No response variance\n');
+    return;
+end
 [para1 res1]=Fit_Gabor_2_AC_sub([4 8],x,y1,y2,sigma,para1,lb,ub,options);
 
 if DEBUG 
-    Debugging_Info('2 with original frequency',para1);
+    Debugging_Info('2 with original frequency',para1,res1);
 end
 
 options=optimset('MaxIter',100,'TolFun',2e-3,'Display',DISP);
 [para1 res1]=lsqcurvefit(@Gabor_2_AC,para1,x,[y1 y2]./sigma,lb,ub,options);
 
 if DEBUG 
-    Debugging_Info('pre-final with original frequency',para1);
+    Debugging_Info('pre-final with original frequency',para1,res1);
 end
 
 % do fit with half the initially guessed frequency
@@ -122,7 +140,7 @@ options=optimset('MaxIter',50,'TolFun',0.02,'Display',DISP);
 [para2 res2]=Fit_Gabor_2_AC_sub([4 8],x,y1,y2,sigma,para2,lb,ub,options);
 
 if DEBUG
-    Debugging_Info('2 with half of original frequency',para2);
+    Debugging_Info('2 with half of original frequency',para2,res2);
 end
 
 options=optimset('MaxIter',100,'TolFun',2e-3,'Display',DISP);
@@ -136,16 +154,31 @@ else
     res=res2;
 end
 
+
 if DEBUG 
-    Debugging_Info('pre-final with half of original frequency',para);
+    Debugging_Info('pre-final with half of original frequency',para,res);
+end
+para4 = para;
+para4(2) = para(2) .* 1.5;
+[para4 res4]=lsqcurvefit(@Gabor_2_AC,para4,x,[y1 y2]./sigma,lb,ub,options);
+
+if res4 < res
+    para = para4;
+    res = res4;
 end
 
+
 options=optimset('MaxIter',1000,'TolFun',1e-6,'Display',DISP);
+
+if 0
+    %bgc. try just optimizing gain/phase for corr. Seems not to help
+    GaborAPFit(sigma(1:length(x))); % setting sigmas
+    [a,b] = lsqcurvefit(@GaborAPFit,para([2 4]),x,y1./sigma(1:length(x)),lb([2 4]),ub([2 4]),options,para);
+end
 [para res]=lsqcurvefit(@Gabor_2_AC,para,x,[y1 y2]./sigma,lb,ub,options);
 
 if para(3)>nf/2
-    disp(['warning: frequency very high: ' num2str(para(3))]);
-    disp(['warning: nyquist frequency  : ' num2str(nf)]);
+    details = AddError(details,'-show','FitACGabors: High frequency %.2f. Nyquist F %.2f',para(3),nf);
 end
 
 if para(3)<0           % frequency negative
@@ -176,13 +209,21 @@ if res1<res1
     end
 end
 
+if plotfit
+    y = Gabor_2_AC(para,x);
+end
+
 if DEBUG 
-    Debugging_Info('final',para);
+    Debugging_Info('final',para,res);
 end
 
 % DEBUGGING INFO START -------------------------------------------------------
-    function Debugging_Info(tag,para)
-        disp(['para_debug : ' num2str(para)]);
+    function Debugging_Info(tag,para, res)
+        if nargin < 3
+            disp(['para_debug : ' num2str(para)]);
+        else
+            disp(['para_debug : ' num2str(para) ' R:' num2str(res)]);
+        end
         Get_Figure(['debug:' tag]);
         plot(x,y1,'b.-'); plot(x,y2,'b.--');
         Gabor_2_AC(1);
@@ -195,6 +236,10 @@ end
 % DEBUGGING INFO END -------------------------------------------------------
 
 end
+
+
+
+
 
 function [para res] = Fit_Gabor_2_AC_sub(fit,x,y1,y2,sigma,init,lb,ub,options)
 
@@ -251,6 +296,7 @@ function y = Gabor_2_AC(para,x)
 
     if nargin==1 % set sigma's
         sigma=para;
+%        sigma = ones(size(para));
         y=-1;
         %disp(['Gabor_2_AC: sigma set to: ' num2str(sigma)]);
     else
@@ -269,6 +315,35 @@ function y = Gabor_2_AC(para,x)
         y(y<0)=0; % simple rectification
 
         y=y./sigma;
+      end
+
+end
+
+function y = GaborAPFit(para,x, params)
+
+% function y = Gabor_2_AC(para,x)
+
+    persistent asigma;
+
+    if nargin==1 % set sigma's
+        asigma=para;
+%        sigma = 1;
+        y=-1;
+        %disp(['Gabor_2_AC: sigma set to: ' num2str(sigma)]);
+    else
+
+        if isempty(asigma)
+            asigma=1;
+            disp('GaborAPFit: sigma set to 1!');
+        end
+
+        y1=params(1)+para(1)*cos(params(3)*x-params(4)).*exp(-(x-params(5)).^2/2/params(6));
+
+        y=y1;
+
+        y(y<0)=0; % simple rectification
+
+        y=y./asigma;
       end
 
 end    

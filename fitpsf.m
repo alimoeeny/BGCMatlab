@@ -16,6 +16,11 @@ function results = fitpsf(probitin, varargin)
 %fitpsf(psf, 'eval', x)   evaluates a returned fit (psf) at the points x
 % fitpsf(psf, 'showfit')  plots data and fit
 %
+%fitpsf(probit, 'twomeans') fits two biases and one slope to two data sets
+%fitpsf(probit, 'twomeans', 'fixsd',sigma)  fits two biases to two data
+%sets, forcing slope parameter to sigma (e.g. for following timecourse of
+%adapataion
+
 
 
 %initialize optional variables     
@@ -26,11 +31,12 @@ fitopt.twomeans = 0;
      fitopt.twofits = 0;
      fitopt.getsderr = 0;
      fitopt.findsdlim = 0;
+     fitopt.fixsd = 0;
      showinit = 0;
      coff = 0;
 
  %make a copy of the input data.    
-    if sum([probitin.n]) == 0;
+    if isfield(probitin,'n') && sum([probitin.n]) == 0;
         results = [];
         return;
     end
@@ -51,6 +57,8 @@ fitopt.twomeans = 0;
              end
                  
          end
+     elseif isfield(probitin,'data')
+         probit = probitin.data;
      else
          probit = probitin;
      end
@@ -71,6 +79,9 @@ fitopt.twomeans = 0;
             coff = varargin{j};
         elseif(strncmpi(varargin{j},'twomeans',6))
             fitopt.twomeans = 1;
+        elseif(strncmpi(varargin{j},'fixsd',6))
+            j = j+1;
+            fitopt.fixsd = varargin{j};
         elseif(strncmpi(varargin{j},'eval',4))
             j = j+1;
             x = varargin{j};
@@ -84,22 +95,31 @@ fitopt.twomeans = 0;
         elseif(strncmpi(varargin{j},'twosd',5))
             fitopt.twosd = 1;
         elseif(strncmpi(varargin{j},'showfit',5))
-        if length(varargin) > j && isstruct(varargin{j+1})
-            j = j+1;
-            infit = varargin{j};
-            probit = infit.data;
-        else
-            infit = fitpsf(probit,varargin{1:j-1});
-        end
-        if fitopt.twomeans
-            colors = mycolors;
-            id = find([infit.data.expno] == 1);
-            [results.fith(1), results.fitx, results.fity] = plotpsych(infit.data(id), infit.fit(1),infit.fit(2),'color',colors{1+coff},varargin{j+1:end});
-            id = find([infit.data.expno] == 2);
-            [results.fith(2) , results.fitx, results.fity]= plotpsych(infit.data(id), infit.fit(3),infit.fit(2),'color',colors{2+coff},varargin{j+1:end});
-        else
-            [results.fith, results.fitx, results.fity] = plotpsych(infit.data, infit.fit(1),infit.fit(2),varargin{j+1:end});
-        end
+            if length(varargin) > j && isstruct(varargin{j+1})
+                j = j+1;
+                infit = varargin{j};
+                probit = infit.data;
+            elseif isfield(probitin,'llike') %given a fit
+                infit = probitin;
+                fitopt = probitin.options;
+            else
+                infit = fitpsf(probit,varargin{1:j-1});
+            end
+            if fitopt.twomeans && fitopt.fixsd > 0
+                colors = mycolors;
+                id = find([infit.data.expno] == 1);
+                [results.fith(1), results.fitx, results.fity] = plotpsych(infit.data(id), infit.fit(1),fitopt.fixsd,'color',colors{1+coff},varargin{j+1:end});
+                id = find([infit.data.expno] == 2);
+                [results.fith(2) , results.fitx, results.fity]= plotpsych(infit.data(id), infit.fit(2),fitopt.fixsd,'color',colors{2+coff},varargin{j+1:end});
+            elseif fitopt.twomeans
+                colors = mycolors;
+                id = find([infit.data.expno] == 1);
+                [results.fith(1), results.fitx, results.fity] = plotpsych(infit.data(id), infit.fit(1),infit.fit(2),'color',colors{1+coff},varargin{j+1:end});
+                id = find([infit.data.expno] == 2);
+                [results.fith(2) , results.fitx, results.fity]= plotpsych(infit.data(id), infit.fit(3),infit.fit(2),'color',colors{2+coff},varargin{j+1:end});
+            else
+                [results.fith, results.fitx, results.fity] = plotpsych(infit.data, infit.fit(1),infit.fit(2),varargin{j+1:end});
+            end
         elseif(strncmpi(varargin{j},'xmax',4))
             j = j+1;
             fitopt.xmax = varargin{j};
@@ -156,8 +176,8 @@ else
 end
 nsd(find(nsd == 0)) = mean(nsd)/10;
 x(2) = sum((([probit(idx).x] - x(1))./nsd(idx)) .* [probit(idx).n])./sum([probit(idx).n]);
-if(x(2) > range([probit.x]))
-    x(2) = range([probit.x]);
+if x(2) > diff(minmax([probit.x]))
+    x(2) = diff(minmax([probit.x]));
 end
 
 results.preg = polyfit([probit.x],nsd,1);
@@ -200,7 +220,11 @@ end
         x(4) = x(2);
        fitopt.twofits = 1;
     end
-    [results.fit, results.llike, results.exit] = fminsearch(@llike, x, options, probit, fitopt);
+    if fitopt.twomeans && fitopt.fixsd > 0
+        [results.fit, results.llike, results.exit] = fminsearch(@llike, x([1 3]), options, probit, fitopt);
+    else
+        [results.fit, results.llike, results.exit] = fminsearch(@llike, x, options, probit, fitopt);
+    end
 
     results.data = probit;
     results.options = fitopt;
@@ -245,6 +269,12 @@ if length(params) > 2  & fitopt.twomeans > 0
      idx = find([probit.expno] == fitopt.expnos(2));
      means(idx) = deal(params(3));
      y = ([probit.x] - means) ./ sd;
+elseif length(params) == 2 && fitopt.twomeans && fitopt.fixsd > 0
+     idx = find([probit.expno] == fitopt.expnos(1));
+     means(idx) = deal(params(1));
+     idx = find([probit.expno] == fitopt.expnos(2));
+     means(idx) = deal(params(2));
+     y = ([probit.x] - means) ./ fitopt.fixsd;    
  elseif  length(params) > 2  & fitopt.twosd > 0
      idx = find([probit.expno] == fitopt.expnos(1));
      sds(idx) = deal(params(2));

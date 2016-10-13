@@ -3,48 +3,266 @@ function [kernel, details] = BuildBWPsychRCa(Expt, varargin)
 % Builds Psych and STA kernels in Fourier domain.
 % [kernel, details] = BuildBWPsychRC(Expt, 'sprc') to build the STA
 % [kernel, details] = BuildBWPsychRC(Expt) to build psych only
-%BuildBWPsychRC(details,kernel) to plot a previously calcualted result
+% [kernel, details] = BuildBWPsychRC(Expt, 'sprconly') to build the STA wihtout Psych kernel
+%                     BuildBWPsychRC(Expt, 'sprconly','fts',details) 
+%                supplies Fourier Transforms and seeds to speed up (for resampling)
+%                N.B. fts often removed from details before saving, so this typically is
+%                done when details has just been calculated
+%
+%BuildBWPsychRC(kernel, details) to plot a previously calcualted result
+%
+%BuildBWPsychRC(details) where details is a cell array, containing the
+%kernel in a field '.kernel');
 %
 %BuildBWPsychRC(Expt,'minseedcount',n) changes mininum numnbe of repeated
-%stim required to build kernel (default 200)
-
+% %stim required to build kernel (default 200)
+%
+%BuildBWPsychRC(Expt,'bw',[bw or]) Uses stimuli with orietnation or and
+%bandwidth bw to calculate a kernel. Drops minseedcount to 50.
+%
+%BuildBWPsychRC(Expt,'allstims') Caclulates kernels for each stimulus, and
+%then returns an average weighted by the smaller number of choices.
+%BuildBWPsychRC(Expt,'byrw') Caclulates kernels separately for each reward
+%size
+%'allstims' and 'byrw' execute loops when the argument is read, so should
+%be the last argument. 
+%BuildBWPsychRC(Expt,'parallel, 'allstims') uses a parfor loop
+%[kernel, details] BuildBWPsychRC(Expt, 'save', 'allstims') saves the
+%kernel data to disk
+% BuildBWPsychRC(Expt, 'saveall', 'allstims') is equivalent to 
+% BuildBWPsychRC(Expt, 'save', 'complete', 'allstims') is
+%[kernel, details] BuildBWPsychRC(Expt, 'complete')
+%        usually large arrays are removed from the details structure, e.g.
+%        the trial average power for each trial.  This flag leaves them in
+%
+%BuildBWPsychRC(Expt,..., 'trialfraction', [a b]) builds a kernel using
+%only part of each trial, where a and b are fractions of the duration.
+%i.e. [0 0.5] uses only frames from the first half of each trial
 
 rotate = 0;
+parallel = 0;
 smoothw = 2;
 nbins = 6;
 seedoffset = 815; %works for lemM079
 seedoffsets = 815;
 sprc = 0;
 delays = [0 300:50:1000];
+trialfraction = [0 1];
 permute = 0;
 spermute = 0;
 ftpwr = [];
 fts = [];
 framerate = 166.7;
+minrw = 0;
+setrw = 0;
+ftseed = 0;
 bw = 130;
+signalbw = 60;
+
 or = [];
 sf = 2;
 wi = 1;
-savemode = 'none';
-minseedcount = 200; %need to lower this for recording sessions
+kbw = 130;  %BW of stim to use for kernel
+kor = 0;
+savemode.save = 0;
+savemode.seedseq = 0;
+minseedcount = [];
+rebuild = 0;
+pwrargs = {};
 
+saveall = 0;
 nresample = 0;
+frameperiod = 166; %default is 60Hz in case
 meanimage = 0;
 noplot = 0;
 plotarg = {};
 pargs = {};
 pj = 0;
 plottype = 'BWRC';
-mksigkernel = 1;
+mksigkernel = 0;
 predictall = 0;
 TrialRange = [];
 recorded=0;
+paralell = 0;
+filterargs = {};
+
 
 j = 1;
 while j <= length(varargin)
-    if strncmpi(varargin{j},'bw',2);
+    if isstruct(varargin{j})
+        details = varargin{j};
+    elseif strncmpi(varargin{j},'allstim',5)
+        Expt = GetExpt(Expt);
+        details.filename = Expt.filename;
+        if ~isfield(Expt,'Trials')
+            return;
+        end
+%first build a list of  bw/or conditions        
+        ors = unique([Expt.Trials.or]);
+        bws = unique([Expt.Trials.ob]);
+        nk = 0;
+        if sum(bws >= 130)
+            nk = nk+1;
+            bw(nk) = 130;
+            or(nk) = 0;
+        end
+        na = j;
+        for j = 1:length(bws)
+            for k = 1:length(ors)
+                id = find([Expt.Trials.or] == ors(k) & [Expt.Trials.ob] == bws(j));
+                np = sum([Expt.Trials(id).RespDir] == -1);
+                nn = sum([Expt.Trials(id).RespDir] == 1);
+                if nn > 1 && np > 1 && bws(j) < 120
+                    nk = nk+1;
+                    bw(nk) = bws(j);
+                    or(nk) = ors(k);
+                end
+            end
+        end
+        details.allkernels = [];
+        if isempty(minseedcount)
+            minseedcount = 50;
+        end
+%Then build the kernels        
+        if parallel
+            parfor (j = 1:nk)
+                Ks{j} = BuildStimKernel(Expt, bw(j), or(j),minseedcount, savall);
+            end
+        else
+            for j = 1:nk
+                Ks{j} = BuildStimKernel(Expt, bw(j), or(j),minseedcount, saveall);
+                nk = 0;
+            end
+        end
+        nk = 0;
+        for j = 1:length(Ks)
+            if isfield(Ks{j},'nframes')
+                nk = nk+1;
+                nf(nk) = min(Ks{j}.nframes);
+                if nk == 1
+                    sumkernel = Ks{j}.kernel .* nf(nk);
+                else
+                    sumkernel = sumkernel + Ks{j}.kernel .* nf(nk);
+                end
+                details.allkernels(nk,:,:) = Ks{j}.kernel;
+                details.allpsum(nk,:,:) = Ks{j}.psum;
+                details.allnsum(nk,:,:) = Ks{j}.nsum;
+                details.stimsum(nk,:,:) = Ks{j}.truesum;
+                details.or(nk) = or(j);
+                details.bw(nk) = bw(j);
+                details.nf(nk,:) = Ks{j}.nframes;
+                details.zid{nk} = Ks{j}.zid;
+                details.Trials(Ks{j}.zid) = Ks{j}.Trials(Ks{j}.zid);
+                if saveall
+                    details.tpwr{j} = Ks{j}.tpwr;
+                    details.pkresp{j} = Ks{j}.pkresp;
+                end
+            end
+        end
+        kernel = sumkernel./sum(nf);
+        details.choiceors = ors;
+        details.Stimvals = Expt.Stimvals;
+
+
+        for j = 1:length(details.Trials)
+            good(j) = length(details.Trials(j).RespDir);
+        end
+        details.Trials = details.Trials(find(good));
+
+        good = zeros(1,length(Expt.Trials));
+        PlotKernel(kernel,details,plottype);
+        if recorded
+            details.recorddate=recorddate;
+        end
+        details.Header = Expt.Header;
+        if savemode.save
+            if isfield(details.Trials,'rsum')
+                exid = [Expt.Trials.id];
+                tid = [Expt.Trials.Trial];
+                for j = 1:length(details.Trials)
+                    id = find(exid == details.Trials(j).id & tid == details.Trials(j).Trial);
+                    if length(id) == 1
+                        Expt.Trials(id).rsum= details.Trials(j).rsum;
+                        good(id) = 1;
+                    end
+                end
+            end
+            if sum(good) > length(good)/0.8 && sum(good) < length(good)
+                fprintf('Removing incomplete trials %s\n',sprintf('%d ',find(good ==0)));
+                Expt.Trials = Expt.Trials(good);
+                details.emptyrsum = find(good ==0);
+            end
+            outname = [details.filename '.mat'];
+            if saveall
+                Kernel = rmfields(details,{'fts'});
+            else
+                Kernel = rmfields(details,{'fts' 'pim' 'nim' 'sigkernel' 'allmean' 'kb' 'tpwr'});
+            end
+            Kernel.kernel = kernel;
+            Kernel.Trials = rmfields(Expt.Trials,'Seedseq');
+            Kernel.Header = Expt.Header;
+            Kernel.Header.builddate = now;
+            Kernel.Header.args = varargin;
+
+            fprintf('Saving Kernel to %s\n',outname);
+            save(outname,'Kernel');
+        end
+        return;
+    elseif strncmpi(varargin{j},'complete',6)
+        saveall = 1;
+    elseif strncmpi(varargin{j},'bw',2);
         j = j+1;
-        bw = varargin{j};
+        kbw = varargin{j}(1);
+        kor = varargin{j}(2);
+    elseif strncmpi(varargin{j},'byrw',4)
+        Expt = GetExpt(Expt);
+        details.Trials = Expt.Trials;
+        details.filename = Expt.filename;
+        [nrw, rws] = Counts([Expt.Trials.rw]); 
+        rws = rws(nrw > 100);
+        nk = 1;
+        for k = 1:length(rws)
+            [kernel,b] = BuildBWPsychRCa(Expt,'rebuild','nosigkernel','minseedcount',1,'setrw',rws(k),varargin{1:j-1});
+            if isfield(b,'nframes')
+            nf(nk) = min(b.nframes);
+            details.pkresp{nk} = b.pkresp;
+            details.allkernels(nk,:,:) = kernel;
+            sumkernel = kernel .* min(b.nframes);
+            details.rws(nk) = rws(k);
+            details.Trials(b.zid) = b.Trials(b.zid);
+            nk = nk+1;
+            end
+        end
+        kernel = sumkernel./sum(nf);
+        ors = unique([Expt.Trials.or]);
+        details.nf = nf;
+        details.Stimvals = Expt.Stimvals;
+        details.choiceors = ors;
+        for j = 1:length(details.Trials)
+            good(j) = length(details.Trials(j).RespDir);
+        end
+        details.Trials = details.Trials(find(good));
+        
+        PlotKernel(kernel,details,plottype);
+        if savemode.save
+            outname = [details.filename '.mat'];
+            if saveall
+                Kernel = rmfields(details,{'fts'});
+            else
+                Kernel = rmfields(details,{'fts' 'pim' 'nim' 'sigkernel' 'allmean' 'kb' 'tpwr'});
+            end
+            Kernel.kernel = kernel;
+            if savemode.seedseq == 0
+                Kernel.Trials = rmfields(Expt.Trials,'Seedseq');
+            end
+            Kernel.Header = Expt.Header;
+            if recorded
+                Kernel.recorddate=recorddate;
+            end
+            Kernel.Header.builddate = now;
+            save(outname,'Kernel');
+        end
+        return;
     elseif strncmpi(varargin{j},'blocks',4);
         j = j+1;
         blocks = varargin{j};
@@ -82,6 +300,9 @@ while j <= length(varargin)
     elseif strncmpi(varargin{j},'minseedcount',6)
         j = j+1;
         minseedcount = varargin{j};
+    elseif strncmpi(varargin{j},'parallel',5)
+        parallel = 1;
+        filterargs = {filterargs{:} 'parallel'};
     elseif strncmpi(varargin{j},'predictall',10)
         predictall = 1;
     elseif strncmpi(varargin{j},'predict',4)
@@ -97,7 +318,7 @@ while j <= length(varargin)
         zid = [pid nid];
         ses = [Expt.Trials(zid).Seedseq];
         choices = [Expt.Trials(zid).RespDir];
-        [tpwr, ses] = CalcTrialPower(Expt, ftpwr, zid);
+        [tpwr, ses, useseed] = CalcTrialPower(Expt, ftpwr, zid,pwrargs{:});
 
         details = PredictChoice(kernel, tpwr, ses, choices, details, varargin{j+1:end});
         ppid = find(details.pkresp >= details.criterion(1));
@@ -115,13 +336,26 @@ while j <= length(varargin)
             j = j+1;
             permute = varargin{j};
         end
+    elseif strncmpi(varargin{j},'rwmin',4)
+        j = j+1;
+        minrw = varargin{j};
+    elseif strncmpi(varargin{j},'setrw',4)
+        j = j+1;
+        setrw = varargin{j};
+    elseif strncmpi(varargin{j},'sigkernel',6);
+        mksigkernel = 1;        
+    elseif strncmpi(varargin{j},'rebuild',4)
+        rebuild = 1;
     elseif strncmpi(varargin{j},'resample',4)
         if length(varargin) > j && isnumeric(varargin{j+1})
             j = j+1;
             nresample= varargin{j};
         end
     elseif strncmpi(varargin{j},'save',4)
-        savemode = 'short';
+        savemode.save = 1;
+        if strcmp(varargin{j},'saveall')
+            saveall = 1;
+        end
     elseif strncmpi(varargin{j},'spermute',4)
         spermute = 1;
         if length(varargin) > j && isnumeric(varargin{j+1})
@@ -136,29 +370,51 @@ while j <= length(varargin)
         rotate = varargin{j} .* pi/180;
     elseif strncmpi(varargin{j},'sprc',4);
             sprc = 1;
+            if strncmpi(varargin{j},'sprconly',6)
+                sprc = 2;
+            end
     elseif strncmpi(varargin{j},'ftpwr',3);
         j = j+1;
         ftpwr = varargin{j};
     elseif strncmpi(varargin{j},'fts',3);
         j = j+1;
-        fts = varargin{j};
-        for j = 1:size(fts,1)
-            ftpwr{j} = squeeze(abs(fts(j,:,:)));
+        if isfield(varargin{j},'fts') %details strcut
+            fts = varargin{j}.fts;
+            ftseed = varargin{j}.seedoffset;
+        else
+            fts = varargin{j};
         end
+        for k = 1:size(fts,1)
+            trueft{k} = squeeze((fts(k,:,:)));
+            ftpwr{k} = abs(trueft{k});
+        end
+    elseif strncmpi(varargin{j},'rfenvelope',4)
+        filterargs = {filterargs{:} varargin{j}};
+        j = j+1;
+        filterargs = {filterargs{:} varargin{j}};
     elseif strncmpi(varargin{j},'rweight',6);
         plotarg = {plotarg{:} varargin{j}};
     elseif strncmpi(varargin{j},'smoothw',6);
         j = j+1;
         smoothw = varargin{j};
+    elseif strncmpi(varargin{j},'trialfraction',9);
+        j = j+1;
+        trialfraction = varargin{j};
     elseif strncmpi(varargin{j},'Trials',6);
         j = j+1;
         TrialRange = varargin{j};
+    elseif strncmpi(varargin{j},'zscore',5);
+        pwrargs = {pwrargs{:} varargin{j}};
     elseif strncmpi(varargin{j},'recorded',3);
         j = j+1;
         recorded=1;
         recorddate = varargin{j};    
     end
     j = j+1;
+end
+
+if isempty(minseedcount)
+    minseedcount = 200; %need to lower this for recording sessions
 end
 
 if iscell(Expt) && isfield(Expt{1},'kernel') && isfield(Expt{1},'predchoice')
@@ -212,26 +468,40 @@ elseif iscellstr(Expt)
     return;
 elseif ischar(Expt)
     ts = now;
-    [a, Ex] = ReadSerialFile(Expt,'readexpt');
+    [a, Ex] = ReadSerialFile(Expt,'readexpt','exptype','ORBW');
     %E
     fprintf('Read Serial Took %.2f\n',mytoc(ts));
+    if ~isfield(Ex,'Trials') || ~isfield(Ex.Trials,'RespDir')
+        details = Ex;
+        return;
+    end
     [kernel, details] = BuildBWPsychRCa(Ex,varargin{:});
     details.filename = Expt;
     details.Header = Ex.Header;
     details.Stimvals = Ex.Stimvals;
-    if strmatch(savemode,'short')
+    if savemode.save
         outname = [Expt '.mat'];
-        Kernel = rmfields(details,{'fts' 'pim' 'nim' 'sigkernel' 'allmean' 'kb'});
+        if saveall
+            Kernel = rmfields(details,{'fts'});
+        else
+            Kernel = rmfields(details,{'fts' 'pim' 'nim' 'sigkernel' 'allmean' 'kb' 'tpwr'});
+        end
         Kernel.kernel = kernel;
         if recorded
             Kernel.recorddate=recorddate;
         end
+        Kernel.Header.builddate = now;
 %        Kernel.Trials = rmfield(Kernel.Trials,'Seedseq');
         save(outname,'Kernel');
     end
     return;
+elseif isfield(Expt,'Trials') && rebuild
+    details.plotr = 0;
 elseif isfield(Expt,'predchoice') & length(varargin) > 0 & isnumeric(varargin{1}) %its a result file.
     [kernel, details] = PlotKernel(varargin{1}, Expt, plottype, varargin{2:end});
+    return;
+elseif isfield(Expt,'allkernels') & isfield(Expt,'kernel')
+    [kernel, details] = PlotKernel(Expt.kernel, Expt, plottype, varargin{2:end});
     return;
 elseif isfield(Expt,'predchoice') & isfield(Expt,'kernel') %its a result file with kernel
     [kernel, details] = PlotKernel(Expt.kernel, Expt, plottype, varargin{1:end});
@@ -242,6 +512,9 @@ elseif isfield(Expt,'predchoice') & isfield(Expt,'fts') %its a result file with 
             ftpwr{j} = squeeze(abs(Expt.fts(j,:,:)));
             end
     end
+elseif isnumeric(Expt)
+    PlotKernel(Expt, details, plottype);
+    return;
 else
     if isfield(Expt,'Trials') && ~isfield(Expt.Trials,'imseed')
         [Expt.Trials.imseed] = deal(815);
@@ -253,7 +526,7 @@ px  = 0.0188; %was size on Berlioz for V1 expts, and on Ravel.
 if length(or) > 1 && meanimage %build FFT plots for several oris with signal, to get signs right
     [nr,nc] = Nsubplots(length(or));
     for j = 1:length(or)
-        nfts = filterim([sf sf/2], [or(j) bw], wi, 'seedoffset', seedoffset, 'pix2deg', px,'nseeds', 10, 'getft','noplot');
+        nfts = filterim([sf sf/2], [or(j) kbw], wi, 'seedoffset', seedoffset, 'pix2deg', px,'nseeds', 10, 'getft','noplot',filterargs{:});
         sigkernel = fftshift(squeeze(mean(abs(nfts),1)));
         subplot(nr,nc,j);
         imagesc([2 257],[1 256],fliplr(sigkernel'));
@@ -267,6 +540,14 @@ if ~isfield(Expt.Trials,'ob')
     kernel = [];
     details.err = 'Not ORBW';
     return;
+end
+
+if minrw > 0
+    id = find([Expt.Trials.rw] > minrw);
+    Expt.Trials = Expt.Trials(id);
+elseif setrw > 0
+    id = find([Expt.Trials.rw] == setrw);
+    Expt.Trials = Expt.Trials(id);
 end
 
 sf = Expt.Stimvals.sf;
@@ -291,17 +572,39 @@ for j = 1:length(Expt.Trials)
         Expt.Trials(j).ob = 0;
     end
 end
+ns = prctile(lens,90);
 gid = lens >= prctile(lens,90);
 badid = find(lens < prctile(lens,90));
-pid = find([Expt.Trials.RespDir] == 1 & [Expt.Trials.ob] == 130 & gid);
-nid = find([Expt.Trials.RespDir] == -1 & [Expt.Trials.ob] == 130 &gid);
+longid = find(lens > ns);
+for j = 1:length(longid)
+    Expt.Trials(longid(j)).Seedseq = Expt.Trials(longid(j)).Seedseq(1:ns);
+end
+if kbw < 120
+    pid = find([Expt.Trials.RespDir] == 1 & [Expt.Trials.ob] == kbw & gid & [Expt.Trials.or] == kor);
+    nid = find([Expt.Trials.RespDir] == -1 & [Expt.Trials.ob] == kbw &gid & [Expt.Trials.or] == kor);
+else
+    kor = or;
+    pid = find([Expt.Trials.RespDir] == 1 & [Expt.Trials.ob] == kbw & gid);
+    nid = find([Expt.Trials.RespDir] == -1 & [Expt.Trials.ob] == kbw &gid);
+end
 spid = find([Expt.Trials.RespDir] == 1 & [Expt.Trials.ob] <= 75 & gid);
 snid = find([Expt.Trials.RespDir] == -1 & [Expt.Trials.ob] <= 75 & gid);
-RespOris = [median([Expt.Trials(snid).or]) median([Expt.Trials(spid).or]); or or+90];
+RespOris = [median([Expt.Trials(spid).or]) median([Expt.Trials(snid).or]); or or+90];
 OriCounts = Counts([Expt.Trials([pid nid]).or]);
 
+if length(nid) < 2 || length(pid) < 2
+    kernel = NaN;
+    return;
+end
 [a,b] = Counts(lens);
-nf = 200;
+if min(lens) == max(lens)
+    nf = min(lens);
+elseif ~isfield(Expt.Stimvals,'nf') || median(lens) == Expt.Stimvals.nf
+    nf = median(lens);
+else
+    fprintf('Forcing nframes to 200');
+    nf = 200;
+end
 errs = find(ismember([Expt.Trials.RespDir],[-1 1]) & lens < nf);
 for j = 1:length(errs)
     Expt.Trials(errs(j)).Seedseq(lens(errs(j))+1:nf) = 1;
@@ -319,7 +622,40 @@ badid = intersect(badid,zid);
 for j = 1:length(badid)
     fprintf('Trials %d only %d seeds\n',badid(j),lens(badid(j)));
 end
+
+
+
+%some recording files are padded to 200 frames
+% only use correct # - important when splitting trial up in fractions
+if isfield(Expt.Trials,'nf')
+    nf = 1+median([Expt.Trials.nf]);
+    for j = 1:length(Expt.Trials)
+        if length(Expt.Trials(j).Seedseq) > nf
+            xseed = Expt.Trials(j).Seedseq(nf+1:end);
+            Expt.Trials(j).Seedseq = Expt.Trials(j).Seedseq(1:nf);
+            if sum(xseed > 1) > 0
+                fprintf('Trial %d has Seeds after nf\n',j);
+            end
+        end
+    end
+end
+
+if isfield(Expt.Header,'frameperiod')
+    frameperiod = Expt.Header.frameperiod;
+end
 if isfield(Expt.Trials,'imseed')
+%Trials with empty imseed make a mess. Remove
+    for j = 1:length(zid)
+        if isempty(Expt.Trials(zid(j)).imseed)
+            good(j) = 0;
+            Expt.Trials(zid(j)).imseed = 0;
+        else
+            good(j) = 1;
+        end
+    end
+    zid = zid(good==1);
+    pid = pid(find(ismember(pid,zid)));
+    nid = nid(find(ismember(nid,zid)));
 
     [seedcounts, details.seedoffsets] = Counts([Expt.Trials(zid).imseed]);
     if details.seedoffsets(1) == 0 & length(details.seedoffsets) == 2
@@ -337,23 +673,29 @@ else
 end
 
 if isempty(ftpwr)
-    if mksigkernel
+    if mksigkernel %calc mean diff between signal containing images, so show what ideal kernel would be
+        if signalbw == 0
         sig = min([Expt.Trials.ob]);
-        nfts = filterim([sf sf/2], [or sig], wi, 'seedoffset', seedoffset, 'pix2deg', px,'nseeds', 1000, 'getft','noplot');
-        pfts = filterim([sf sf/2], [or+90 sig], wi, 'seedoffset', seedoffset, 'pix2deg', px,'nseeds', 1000, 'getft','noplot');
-        sigkernel = fftshift(squeeze(mean(abs(pfts),1)-mean(abs(nfts),1)));
+        else
+            sig = signalbw;
+        end
+        nfts = filterim([sf sf/2], [or sig], wi, 'seedoffset', seedoffset, 'pix2deg', px,'nseeds', 1000, 'getft','noplot',filterargs{:});
+        pfts = filterim([sf sf/2], [or+90 sig], wi, 'seedoffset', seedoffset, 'pix2deg', px,'nseeds', 1000, 'getft','noplot',filterargs{:});
+        %Pk is Respdir == 1 (smallest ori) - RespDir==-1 (largest ori)
+        sigkernel = fftshift(squeeze(mean(abs(nfts),1)-mean(abs(pfts),1)));
+        sigors = [or or+90];
     end
     
-%restrict to trials with enough reps to be worth calculating images
-if length(seedcounts) > 1 
-    xid = find(seedcounts < minseedcount);
-    xxid = [];
-    for j = 1:length(xid)
-        xxid = [xxid find([Expt.Trials(zid).imseed] == seedoffsets(xid(j)))];
+    %restrict to trials with enough reps to be worth calculating images
+    if length(seedcounts) > 1
+        xid = find(seedcounts < minseedcount);
+        xxid = [];
+        for j = 1:length(xid)
+            xxid = [xxid find([Expt.Trials(zid).imseed] == seedoffsets(xid(j)))];
+        end
+        nid = setdiff(nid, zid(xxid));
+        pid = setdiff(pid, zid(xxid));
     end
-    nid = setdiff(nid, zid(xxid));
-    pid = setdiff(pid, zid(xxid));
-end
     zid = [pid nid];
     
     sid = find(seedcounts >= minseedcount);
@@ -367,22 +709,58 @@ end
     %if they are all 0 , will be set to 815 above
     for j = 1:length(sid)
         seed = seedoffsets(sid(j));
-        fts = filterim([sf sf/2], [or bw], wi, 'seedoffset', seed, 'pix2deg', px,'nseeds', 1000, 'getft','noplot');
+        fts = filterim([sf sf/2], [kor kbw], wi, 'seedoffset', seed, 'pix2deg', px,'nseeds', 1000, 'getft','noplot',filterargs{:});
         for j = 1:size(fts,1)
-            pwr{j} = squeeze(abs(fts(j,:,:)));
+            trueft{j} = squeeze((fts(j,:,:)));
+            pwr{j} = abs(trueft{j});
         end
         tid = find([Expt.Trials(zid).imseed] == seed);
         alltid = [alltid tid];
-        [X, ses(:,tid)] = CalcTrialPower(Expt, pwr, zid(tid));
-        for k = 1:length(tid)
-            tpwr{tid(k)} = X{k};
-            idlist(tid(k)) = Expt.Trials(zid(tid(k))).id;
+        if sprc < 2
+            [X, ses(:,tid),useseed, truesum] = CalcTrialPower(Expt, pwr, zid(tid),'trialfraction',trialfraction,pwrargs{:});
+            for k = 1:length(tid)
+                tpwr{tid(k)} = X{k};
+                idlist(tid(k)) = Expt.Trials(zid(tid(k))).id;
+            end
         end
+        ftseed = seed;
     end
+elseif sprc < 2
+    pwr = ftpwr;
+    alltid = find([Expt.Trials(zid).imseed] == seedoffsets(1));
+    [tpwr, ses, useseed, truesum] = CalcTrialPower(Expt, pwr, zid,'trialfraction',trialfraction,pwrargs{:});
 else
     pwr = ftpwr;
-    [tpwr, ses] = CalcTrialPower(Expt, pwr, zid);
 end
+
+if sprc == 2
+    tid = find([Expt.Trials(zid).imseed] == ftseed);
+    alltid = tid;
+    ses = [Expt.Trials(zid).Seedseq];
+    useseed = ftseed;
+    truesum = zeros(size(pwr{1}));
+    truesum = abs(fts(ses(1)));
+    [a,b] = find(ses ==0);
+    if isempty(a)
+        nf = size(ses,1);
+    else
+        nf = min(a)-1;
+    end
+    ses = ses(1:nf,:);
+    [a,b] = Counts(ses(:),'minval',1);
+    for j = 1:length(b)
+        truesum = truesum + abs(fts(b(j),:,:)).*a(j);
+    end
+    truesum = squeeze(truesum)./sum(a);
+    tpwr = {};
+    useseed = 1:size(ses,1);
+end
+
+%if some trials had imseeds not in list (too few), need to remove these
+%from zid, pid, nid
+zid = zid(alltid);
+pid = pid(find(ismember(pid,zid)));
+nid = nid(find(ismember(nid,zid)));
 choices = [ones(size(pid)) ones(size(nid)).*-1];
 
 if meanimage
@@ -391,24 +769,37 @@ if meanimage
     imagesc([2 257],[1 256],fliplr(a));
     aor = AddOriSum(a, plotarg);
     [a,b] = GetAngle(aor);
-    title(sprintf('OR= %.0f->%.0f (%.0f), bw = %.1f',or,a,b,bw));
+    title(sprintf('OR= %.0f->%.0f (%.0f), bw = %.1f',or,a,b,kbw));
     details.meanor = aor;
     return;
 end
 
 sevals = unique(ses);
+sevals = sevals(sevals > 0);
 
+if sprc < 2
 %kernel is respdir ==1  - respdir == -1
 [kernel, details] = CalcPKernel(Expt,pid, nid, pwr, tpwr);
 details.choiceors = RespOris;
 details.OriCounts = OriCounts;
+if length(Counts(choices)) > 1
 details = PredictChoice(kernel, tpwr, ses, choices, details,pargs{:});
+else
+    return;
+end
+end
 details.choices = choices;
 details.zid = zid;
 details.impx = px;
 details.seedoffset = seedoffset; %for 0 signal
 details.seedoffsets = seedoffsets; %all
 details.seedcounts = seedcounts; %all
+details.Header = Expt.Header;
+details.Stimvals = Expt.Stimvals;
+details.trialfraction = trialfraction;
+details.useseed = useseed;
+details.truesum = truesum;
+
 if isfield(Expt.Header,'Name')
     details.filename = Expt.Header.Name;
 else
@@ -417,16 +808,20 @@ end
 
 %store enough in Trials so that can build PSFs with ExptPsych
 for j = length(Expt.Trials):-1:1
-    for f = {'or' 'ob' 'RespDir' 'se' 'Seedseq' 'imseed' 'id'}
+    for f = {'or' 'ob' 'RespDir' 'se' 'Seedseq' 'imseed' 'id' 'Trial'}
         if isfield(Expt.Trials,f{1})
             Trials(j).(f{1}) = Expt.Trials(j).(f{1});
         end
     end
 end
+
+if sprc < 2
 for j = 1:length(zid)
     Trials(zid(j)).pkresp = details.pkaresp(j);
+    Trials(zid(j)).pkrespjk = details.pkresp(j); %done with jacknife
+    Trials(zid(j)).rsum = RadialSum(fftshift(tpwr{j})',100);
 end
-
+end
 if length(TrialRange)
     Trials = Trials(TrialRange);
 end
@@ -440,7 +835,7 @@ if predictall
         fprintf('Or %.0f, bw %.0f: ',ors(j),bws(k));
         id = find(ismember([Expt.Trials.RespDir],[-1 1]) & [Expt.Trials.ob] == bws(k) & [Expt.Trials.or] == ors(j));
         if length(id)
-        nfts = filterim([sf sf/2], [ors(j) bws(k)], wi, 'seedoffset', seedoffset, 'pix2deg', px,'nseeds', 1000, 'getft','noplot');
+        nfts = filterim([sf sf/2], [ors(j) bws(k)], wi, 'seedoffset', seedoffset, 'pix2deg', px,'nseeds', 1000, 'getft','noplot',filterargs{:});
         for m= 1:size(fts,1)
             pwr{m} = squeeze(abs(nfts(m,:,:)));
         end
@@ -453,7 +848,7 @@ if predictall
         end
     end
     end
-    [tpwr, ses] = CalcTrialPower(Expt, pwr, zid);
+    [tpwr, ses] = CalcTrialPower(Expt, pwr, zid,pwrargs{:});
 end
 
 details.Trials = Trials;
@@ -560,9 +955,19 @@ end
 
 if mksigkernel & exist('sigkernel','var');
     details.sigkernel = sigkernel;
+    details.sigor = AddOriSum(sigkernel','noplot');
+    details.sigors = sigors;
+    [details.Trials.idealresp] = deal(NaN);
+    for j = 1:length(zid);
+        details.Trials(zid(j)).idealresp = details.sigor * details.Trials(zid(j)).rsum';        
+    end
+    ipid = find([details.Trials.idealresp] > 0);
+    inid = find([details.Trials.idealresp] < 0);
+    details.idealpkor = mean(cat(1,details.Trials(ipid).rsum))-mean(cat(1,details.Trials(inid).rsum));
 end
-details.kb = CalcPKernel(Expt,pid(2:end), nid, pwr, tpwr(2:end));
-
+if sprc < 2
+    details.kb = CalcPKernel(Expt,pid(2:end), nid, pwr, tpwr(2:end));
+end
 if permute
     details.kernelsd = squeeze(std(ks,[],1));
     details.permpred = pperf;
@@ -583,11 +988,13 @@ for j = 1:size(sevals,1) %what size(ses,2) < size(sevals,1)
     end
 end
 
-[details.pkor, a] = AddOriSum(kernel',plotarg);
-details.pkor = a.ork;
-details.sfk = a.sfk;
+if sprc < 2
+    [details.pkor, a] = AddOriSum(kernel',plotarg);
+    details.pkor = a.ork;
+    details.sfk = a.sfk;
+end
 if sprc
-    [secounts, sevals] = Counts(ses);
+    [secounts, sevals] = Counts(ses,'minval',1);
     sxmean = zeros(size(fts,2),size(fts,3));
     for j = 1:length(sevals);
         sxmean = sxmean + squeeze(fts(sevals(j),:,:)) .* secounts(j);
@@ -600,26 +1007,33 @@ if sprc
         nf = size(ses,1);
         k = 1:length(zid);
         for j = 1:length(zid)
-            frames = floor((Expt.Trials(zid(j)).Spikes-delay)./166);
+            frames = floor((Expt.Trials(zid(j)).Spikes-delay)./frameperiod);
             frames = frames(find(frames >0 & frames <= nf));
             allframes{j} = frames;
+            nframes = setdiff(1:nf,frames);
+            spkseeds{di,j} = ses(frames,k(j))';
+            nospkseeds{di,j} = ses(nframes,k(j))';
             spseeds = [spseeds ses(frames,k(j))']; %seeds associated with spikes
         end
 
         spsum = zeros(size(pwr{1}));
         spsxsum = zeros(size(pwr{1}));
-        [nspk, sv] = Counts(spseeds);
+        [nspk, sv] = Counts(spseeds,'minval',1);
+%spsum is spike-triggered amplitude spectrum
+%spxsum is spike-triggered Fourier Transform
         for j = 1:length(sv)
             se = sv(j);
             spsum = spsum + nspk(j) .* pwr{se};
-            spsxsum = spsxsum + nspk(j) .* squeeze(fts(se,:,:));
+            spsxsum = spsxsum + nspk(j) .* trueft{se};
         end
-        spmean = spsum./sum(nspk) - details.allmean;
+        spmean = spsum./sum(nspk) - details.truesum;
         details.spmean(di,:,:) = fftshift(spmean);
         details.spvar(di) = var(spmean(:));
         sxmean = spsxsum./sum(nspk) - details.allsxmean;
         details.sxmean(di,:,:) = fftshift(sxmean);
         details.sxvar(di) = var(abs(sxmean(:)));
+        details.spkseeds = spkseeds;
+        details.nospkseeds = nospkseeds;
         nspks(di,sv) = nspk;
     end
     ns = length(ses(:));
@@ -727,12 +1141,13 @@ if sprc
     end
         latency = 500;
     for j = zid
-        Expt.Trials(j).Predcount(1) = sum(netspk(Expt.Trials(j).Seedseq)); %from Spike Triggered power spec
-        Expt.Trials(j).Predcount(2) = sum(ps(Expt.Trials(j).Seedseq)); %from Spike trigged response to seeds
+        Expt.Trials(j).Predcount(1) = sum(netspk(Expt.Trials(j).Seedseq(useseed))); %from Spike Triggered power spec
+        Expt.Trials(j).Predcount(2) = sum(ps(Expt.Trials(j).Seedseq(useseed))); %from Spike trigged response to seeds
         Expt.Trials(j).count = sum(Expt.Trials(j).Spikes > latency & Expt.Trials(j).Spikes < Expt.Trials(j).dur + latency);
-        Expt.Trials(j).sepower = porder(Expt.Trials(j).Seedseq); %binned/ordered by image power .* power kernel 
-        Expt.Trials(j).frpower = forder(Expt.Trials(j).Seedseq);
-        Expt.Trials(j).sxpower = sorder(Expt.Trials(j).Seedseq);
+        Expt.Trials(j).sepower = porder(Expt.Trials(j).Seedseq(useseed)); %binned/ordered by image power .* power kernel 
+        Expt.Trials(j).sepower(Expt.Trials(j).sepower ==0) = 1;
+        Expt.Trials(j).frpower = forder(Expt.Trials(j).Seedseq(useseed));
+        Expt.Trials(j).sxpower = sorder(Expt.Trials(j).Seedseq(useseed));
     end
     cfig = gcf;
     details.nspks = sum([Expt.Trials(zid).count]);
@@ -766,24 +1181,31 @@ if sprc
     hold on;
     plot(pc(2,:),[Expt.Trials(zid).count],'go');
     plot(pc(3,:),[Expt.Trials(zid).count],'ro');
+    xlabel('Predicted Count');
+    ylabel('Observed');
     subplot(2,2,3);
     imagesc(fliplr(squeeze(details.spmean(t,:,:))'));
     end
-    xc = corrcoef(kernel(:), details.spmean(t,:,:));
-    details.psxcorr(1) = xc(2,1);
     [details.spkor, spring] = AddOriSum(squeeze(details.spmean(t,:,:))',plotarg);
-    xc = corrcoef(details.pkor, details.spkor);
-    details.psxcorr(2) = xc(2,1);
+    if exist('kernel','var')
+        xc = corrcoef(kernel(:), details.spmean(t,:,:));
+        details.psxcorr(1) = xc(2,1);
+        xc = corrcoef(details.pkor, details.spkor);
+        details.psxcorr(2) = xc(2,1);
+    else
+        details.psxcorr = [NaN NaN];
+    end
     [a,b,c] = GetAngle(details.spkor);
-    title(sprintf('VarRatio %.2f Pkxc %.3f,%.3f Or %.0f',details.spvar(t)./details.spvar(1),details.psxcorr(1),details.psxcorr(2),a)); 
+    title(sprintf('Amp: VarRatio %.2f Pkxc %.3f,%.3f Or %.0f',details.spvar(t)./details.spvar(1),details.psxcorr(1),details.psxcorr(2),a)); 
     details.cp = CalcCP([Expt.Trials(pid).count],[Expt.Trials(nid).count]);
     details.ccp(1) = CalcCP([Expt.Trials(pid).count]-pc(1,ismember(zid,pid)),...
         [Expt.Trials(nid).count]-pc(1,ismember(zid,nid))); %cp after adjust counts using STA of power
     details.ccp(2) = CalcCP([Expt.Trials(pid).count]-pc(3,ismember(zid,pid)),...
         [Expt.Trials(nid).count]-pc(3,ismember(zid,nid))); %adjusted using subspace map to binned power
-    details.ccp(4) = CalcCP([Expt.Trials(details.fixpid).count],[Expt.Trials(details.fixnid).count]);
     details.ccp(3) = CalcCP([Expt.Trials(pid).count]-pc(2,ismember(zid,pid)),...
         [Expt.Trials(nid).count]-pc(2,ismember(zid,nid)));
+    if isfield(details,'fixpid')
+    details.ccp(4) = CalcCP([Expt.Trials(details.fixpid).count],[Expt.Trials(details.fixnid).count]);
     ppid = find(details.pkresp >= details.criterion(1));
     pnid = find(details.pkresp < details.criterion(1));
     %ccp(5) is the CP based on predicted choices, jacknife
@@ -792,6 +1214,8 @@ if sprc
     details.ccp(6) = CalcCP(pc(1,ppid),pc(1,pnid)); %pred from p(spike|power)
     details.ccp(7) = CalcCP(pc(3,ppid),pc(3,pnid)); %pred from subspace map to binned powers
     details.ccp(8) = CalcCP(pc(2,ppid),pc(2,pnid)); %from spike triggered resp to seeds. 
+    end
+ 
 %ccp(9) is the Cp based on overpredicted choices (not using jacknife)
     if isfield(details,'pkaresp') %used jacknife
         ppid = find(details.pkaresp >= details.criterion(2));
@@ -808,36 +1232,80 @@ end
 
 
 
-if noplot == 0
-if rotate
-    [xi, yi] = meshgrid([1:wi],[1:wi]);
-    xr = (xi-128) .* cos(pi/4) + (yi-128) .* sin(pi/4);
-    yr = (yi-128) .* cos(pi/20) - (xi-128) .* sin(pi/20);
+if sprc < 2
+    if noplot == 0
+        if rotate
+            [xi, yi] = meshgrid([1:wi],[1:wi]);
+            xr = (xi-128) .* cos(pi/4) + (yi-128) .* sin(pi/4);
+            yr = (yi-128) .* cos(pi/20) - (xi-128) .* sin(pi/20);
+        end
+        hold off;
+        imagesc([2 257],[1 256],fliplr(kernel'));
+    end
+    [details.pkor, b] = AddOriSum(kernel',plotarg);
+    details.pkor = b.ork;
+    if b.r < spring.r & noplot == 0
+        imagesc([2 257],[1 256],fliplr(kernel'));
+        AddOriSum(kernel','maxr',spring.r);
+    end
+    [a,b,c] = GetAngle(details.pkor);
+    if isfield(details,'cp') & noplot == 0
+        title(sprintf('PK:CP %.2f, %.2f, %.2f Or%.0f',details.cp,details.ccp(1),details.ccp(2),a));
+    end
+    details.pkvar = var(kernel(:));
+else
+    kernel = [];
 end
-hold off;
-imagesc([2 257],[1 256],fliplr(kernel'));
-end
-[details.pkor, b] = AddOriSum(kernel',plotarg);
-details.pkor = b.ork;
-if b.r < spring.r & noplot == 0
-    imagesc([2 257],[1 256],fliplr(kernel'));
-    AddOriSum(kernel','maxr',spring.r);
-end
-[a,b,c] = GetAngle(details.pkor);
-if isfield(details,'cp') & noplot == 0
-title(sprintf('CP %.2f, %.2f, %.2f Or%.0f',details.cp,details.ccp(1),details.ccp(2),a));
-end
-details.pkvar = var(kernel(:));
 details.fts = fts;
 
 
-function [tpwr, ses] = CalcTrialPower(Expt, pwr, zid, varargin)
+function [details, b] = BuildStimKernel(Expt, bw, or, minseedcount, saveall)
+    [a,b] = BuildBWPsychRCa(Expt,'rebuild','nosigkernel','bw',[bw or],'minseedcount',minseedcount);
+    if isfield(b,'nframes') && min(b.nframes) > 1
+        details.nframes = b.nframes;
+        details.kernel = a;
+        details = CopyFields(details,b,{'psum' 'nsum' 'nframes' 'zid' 'truesum'});
+        details.Trials(b.zid) = b.Trials(b.zid);
+        if saveall
+            details = CopyFields(details,b,{'tpwr' 'pkresp'});
+        end
+    else
+        details = [];
+    end
 
+
+function [Expt, details] = GetExpt(Expt)
+details = [];
+if ischar(Expt)
+    name = Expt;
+    [a,Expt] = ReadSerialFile(name,'readexpt','exptype','ORBW');
+    Expt.filename = name;
+elseif isfield(Expt,'Header') && isfield(Expt.Header,'loadname')
+    Expt.filename = Expt.Header.loadname;
+elseif isfield(Expt,'Header') && isfield(Expt.Header,'name')
+    Expt.filename = Expt.Header.name;
+end
+if ~isfield(Expt,'Trials') || isempty(Expt.Trials)
+    return;
+end
+id = find(abs([Expt.Trials.RespDir]) ==1);
+Expt.Trials = Expt.Trials(id);
+
+
+
+function [tpwr, ses, useseed, isum] = CalcTrialPower(Expt, pwr, zid, varargin)
+
+trialfraction = [0 1]; %use whole trial by default
 scoretype = 0;
 j = 1;
 while j <= length(varargin)
     if strncmpi(varargin{j},'absolute',4)
         scoretype = 1;
+    elseif strncmpi(varargin{j},'zscore',4)
+        scoretype = 2;
+    elseif strncmpi(varargin{j},'trialfraction',4)
+        j = j+1;
+        trialfraction = varargin{j};
     end
     j = j+1;
 end
@@ -846,7 +1314,7 @@ if isempty(zid)
     fprintf('No Trials \n');
 end
 ses = [Expt.Trials(zid).Seedseq];
-nse = find(sum(ses') > 0);  %remove trailing zeros
+nse = find(min(ses') > 0);  %remove trailing zeros
 ses = ses(nse,:);
 for j = 1:length(Expt.Trials)
     if length(Expt.Trials(j).Seedseq) > max(nse)
@@ -855,25 +1323,34 @@ for j = 1:length(Expt.Trials)
 end
 
 
+first = 1 + floor(trialfraction(1) * size(ses,1));
+last = floor(size(ses,1) * trialfraction(2));
+useseed = first:last;
 isum = zeros(size(pwr{1}));
 for j = 1:length(zid)
-    tpwr{j} = MeanIm(pwr,ses(:,j));
+    tpwr{j} = MeanIm(pwr,ses(useseed,j));
     isum = isum+tpwr{j};
 end
-if scoretype == 0
-    isum = isum./length(zid);
+isum = isum./length(zid);
+if scoretype == 0 %%express power relative to the mean of all trials.
     for j = 1:length(zid)
         tpwr{j} = tpwr{j} - isum;
     end
+elseif scoretype == 2 %%express power as z-score
+    tvar = std(cat(3,tpwr{:}),1,3);
+    for j = 1:length(zid)
+        tpwr{j} = (tpwr{j} - isum)./tvar;
+    end
 end
+ses = ses(useseed,:);
 
 
 function [mim, good] = MeanIm(pwr, id)
 
+good = 0;
 if isempty(id)
     mim = zeros(size(pwr{1}));
     fprintf('Empty list for Meanim');
-    good = 0;
     return;
 end
 if length(id) > 5 % bizarerely this is much faster, even if n = 200
@@ -896,6 +1373,7 @@ function [kernel, details] = CalcPKernel(Expt, pid, nid, pwr, tpwr)
 
 psum = zeros(size(pwr{1}));
 nsum = zeros(size(pwr{1}));
+asum = zeros(size(pwr{1}));
 pz = 0;
 nz = 0;
 for j = 1:length(pid)
@@ -903,6 +1381,7 @@ for j = 1:length(pid)
         pz = pz+1;
     else
         psum = psum + tpwr{j}; %in order as zid = [pid nid]
+        asum = asum + tpwr{j}; %in order as zid = [pid nid]
     end
 end
 for j = length(pid)+1:length(pid)+length(nid)
@@ -910,6 +1389,7 @@ for j = length(pid)+1:length(pid)+length(nid)
         nz = nz+1;
     else
         nsum = nsum + tpwr{j}; %in order as zid = [pid nid]
+        asum = asum + tpwr{j}; %in order as zid = [pid nid]
     end
 end
 pn = length(pid)-pz;
@@ -971,6 +1451,8 @@ details.err = sum(abs(diffs(:)));
 else
     details.err = NaN;
 end
+
+
 function [kernel, details] = PlotKernel(kernel, details, plottype, varargin)
 
 
@@ -989,7 +1471,14 @@ while j <= length(varargin)
 end
 
 
-ntrials = length(details.pkresp);
+if ~isfield(details,'pkvar')
+    details.pkvar = var(kernel(:));
+end
+if isfield(details,'pkresp')
+    ntrials = length(details.pkresp);
+else
+    ntrials = 0;
+end
 
 if strncmpi(plottype,'RCVar',4)
     subplot(2,2,1);
@@ -1082,7 +1571,7 @@ elseif strncmpi(plottype,'BWRCall',4)
         details.plotr = max([pb.r sb.r]);
     else
         [a,b,c] = GetAngle(pkor);
-        title(sprintf('Pk: var %.2f  Or%.0f N%.0f',details.pkvar,a,length(details.choices)));
+        title(sprintf('Pk: var %.2f  Or%.0f N%.0f',details.pkvar,a,ntrials));
         details.plotr = pb.r;
         subplot(nr,nc,1+np);
         hold off; 
@@ -1158,7 +1647,9 @@ function [veco, maxo, r] = GetAngle(ors)
     r = sum(R .* (ca + i * sa))./sum(R);
     veco = angle(r).* 90/pi; %halve
     r = abs(r);
+    
 
+    
 function [sor, details]  = AddOriSum(kernel, varargin)
 coss = cos([0:pi/180:pi]);
 sins = sin([0:pi/180:pi]);
@@ -1178,46 +1669,23 @@ while j <= length(varargin)
     end
     j = j+1;
 end
-%pixel 129,129 is the center of a 256x256 fourier transform;
-linrvals = [0.5:0.5:45.5];
 
-for j = 1:length(linrvals)
-    r = linrvals(j);
-    xi = r .* coss;
-    yi = r .* sins;
-    sir(j,:) = interp2(kernel, 129+xi, 129+yi);
-    rwts(j) = r^2;
-end
-svar = var(sir');
-id = find(svar > max(svar)./50);
-if fixr
-    r= fixr;
-else
-    r = linrvals(id(end));
-    rwts(id(end)+1:end) = 0;
-end
+[sor, details] = RadialSum(kernel, fixr);
+cc = details.center;
+svar = var(details.sir');
+[a,b] = max(svar);
+id = find(svar(b:end) > a./20);
+r = id(1)+b;
+xi = cc(1) + [r .* coss; (r-1) .* coss];
+yi = cc(2) + [r .* sins; (r-1) .* sins];
+uxi = cc(1) - [r .* coss; (r-1) .* coss];
+uyi = cc(2) - [r .* sins; (r-1) .* sins];
 details.r = r;
 
-cc = 129;
-xi = 129 + [r .* coss; (r-1) .* coss];
-yi = 129 + [r .* sins; (r-1) .* sins];
-uxi = 129 - [r .* coss; (r-1) .* coss];
-uyi = 129 - [r .* sins; (r-1) .* sins];
-if weightbyr
-    sor = rwts * sir;
-    details.sfk = sum(sir,2);
-    details.ork = sor;
-    details.weighted =1;
-else
-    sor = sum(sir);
-    details.sfk = sum(sir,2);
-    details.ork = sum(sir);
-    details.weighted = 0;
-end
 if noplot == 0
     cr = caxis;
     sor = (range(cr) .* (sor - min(sor))./range(sor)) + cr(1);
-    set(gca,'xlim',[129-r 129+r],'ylim',[129-r 129+r]);
+    set(gca,'xlim',[cc(1)-r cc(1)+r],'ylim',[cc(2)-r cc(2)+r]);
     hold on;
     pcolor(xi,yi,fliplr([sor; sor]));
     pcolor(uxi,uyi,fliplr([sor; sor]));

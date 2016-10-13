@@ -15,6 +15,10 @@ if iscell(Expt) & ischar(Expt{1})
     for j = 1:length(Expt)
         [isi{j}, details{j}] = CheckExpt(Expt{j});
     end
+elseif iscell(Expt) & isfield(Expt{1},'Trials') % a cell array of expts
+    for j = 1:length(Expt)
+        [isi{j}, details{j}] = CheckExpt(Expt{j});
+    end
 elseif iscell(Expt)
     details = Expt; %plot up existing data
 end
@@ -38,15 +42,25 @@ if iscell(Expt)
 end
 delay = 500;
 nerr = 0;
+rptframes = [];
 for j = 1:length(Expt.Trials)
     ends(j) = Expt.Trials(j).End(end);
     starts(j) = Expt.Trials(j).Start(1);    
     durs(j) = Expt.Trials(j).End(end) - Expt.Trials(j).Start(1);
     spks(j) = length(find(Expt.Trials(j).Spikes > delay & Expt.Trials(j).Spikes < durs(j)+delay));
+    if isfield(Expt.Trials,'rptframes')
+        rptframes(j) = length(Expt.Trials(j).rptframes);
+    end
 end
 isis = starts(2:end) - ends(1:end-1);
 isi(1) = mode(isis);
 isi(2) = median(isis);
+
+if ~isempty(rptframes)
+    id = find(rptframes > 0);
+    details.nrpt = length(id);
+    details.meanrpt = mean(rptframes(id));
+end
 
 details.tdur = sum(durs);
 details.TotalDur(1) = Expt.Trials(end).End(end) - Expt.Trials(1).Start(1);
@@ -107,3 +121,4 @@ for j = 1:length(wrongsacs)
     fprintf('Trial %.0f Resp %.0f Sac %.1f at %.0f\n',wrongsacs(j),trial.RespDir,sac.dir,sac.start-(trial.End-trial.Start));
 end
 end
+

@@ -1,6 +1,6 @@
 function [smoothed, x] = smhist(dat, varargin)
 %
-% [smoothed, x] = smhist(dat, ...)
+% [smoothed, x] = smhist(dat, ...) make smoothed histogram
 %
 % returns a smoothed density histogram for a set of values.
 % x returns the values of dat associated with each density value.
@@ -19,13 +19,16 @@ dat = dat(find(~isnan(dat)));
 
 %sd = 4 * range(dat)/sqrt(length(dat));
 sd = std(dat)/sqrt(length(dat));
-step = (2 * sd + range(dat))/nsmp;
+step = (2 * sd + diff(minmax((dat))))/nsmp;
 drange = [];
+noclip = 0;
 period = 0;
 setx = [];
 smoothed = [];
+boxcar = 1;
 x = [];
 j= 1;
+
 while j < nargin
     if strncmpi(varargin{j},'sd',2)
         j = j+1;
@@ -33,10 +36,14 @@ while j < nargin
     elseif strncmpi(varargin{j},'circular',3)
         period = 2 * pi;
         dat = [dat; dat + period];
+    elseif strncmpi(varargin{j},'box',3)
+        boxcar = 0; %correct. 1 is Gaussian
     elseif strncmpi(varargin{j},'period',3)
         j = j+1;
         period = varargin{j};
         dat = [dat; dat + period];
+    elseif strncmpi(varargin{j},'noclip',5)
+        noclip = 1;
     elseif strncmpi(varargin{j},'nsmp',2)
         j = j+1;
         nsmp = varargin{j};
@@ -82,6 +89,11 @@ if isempty(drange)
     if period
         drange(1) = (min(dat)+max(dat) - period)/2;
         drange(2) = drange(1) + period;
+    elseif noclip
+        nstep = floor((max(dat)-min(dat))/step);
+        step = (max(dat)-min(dat))./nstep;
+        drange(1) = min(dat)+step/2;
+        drange(2) = max(dat)-step/2;
     else
         drange(1) = min(dat)-sd;
         drange(2) = max(dat) + sd;
@@ -89,6 +101,8 @@ if isempty(drange)
 end
 if length(drange) > 2
     x = drange;
+elseif noclip    
+    x = drange(1):step:drange(2);
 else
     x = drange(1):step:drange(2)+0.8 * step;
 end
@@ -97,15 +111,19 @@ if ~isempty(setx)
     x = setx;
 end
 
-boxcar = 1;
-if boxcar == 1
+if boxcar == 1 %gaussian!!
     j = 1;
     for j = 1:length(x)
         smoothed(j) = sum(exp(-(dat-x(j)).^2/aw));
+        scale(j) = sum(exp(-(x-x(j)).^2/aw));
+    end
+    if noclip
+        scale = scale./max(scale);
+        smoothed = smoothed./scale;
     end
 elseif boxcar == 2
     [b,a] = hist(dat);
-
+    
 k = trapz(a,b)/trapz(x,smoothed);
 smoothed = smoothed * k;
 

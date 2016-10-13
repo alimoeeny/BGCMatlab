@@ -1,4 +1,5 @@
 #!/bin/sh
+diff $1 dev/$1
 ci $1
 echo "Checked in current release version\n"
 co -l $1

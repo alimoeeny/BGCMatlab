@@ -5,11 +5,15 @@ function DataThief(im, varargin);
 %
 %DataThief(im,[xl yl xu yu])
 %specifies axis range. Then User clicks on extremes, and range for mouse
-%clicks is set automatially
+%clicks is set automatially. It expects 4 clicks (in case axes don't join
+%at the origin).  If the fourth click is redundant, it uses a common origin
+%for both axes. 
 %get UserData from the figure to use data
 DATA = [];
 DATA.x = [];
 DATA.y = [];
+DATA.allx = {};
+DATA.ally = {};
 DATA.axptsx = [];
 DATA.axptsy = [];
 DATA.scaled = 0;
@@ -18,7 +22,7 @@ DATA.state.showduplicate = 1;
 DATA.title = 'Data Image';
 
 j = 1;
-if isnumeric(varargin{1}) & length(varargin{1}) == 4
+if ~isempty(varargin) && isnumeric(varargin{1}) && length(varargin{1}) == 4
     ranges = varargin{1};
     j = 2;
 end
@@ -37,6 +41,7 @@ DATA.fig = gcf;
 if isempty(findobj(gcf,'Tag','DataMenu'))
 hm = uimenu(gcf,'Label','DataThief','Tag','DataMenu');
 uimenu(hm,'Label','Redo axes','Callback',{@SetAxes});
+uimenu(hm,'Label','New Line','Callback',{@AddLine});
 uimenu(hm,'Label','Delete one point','Callback',{@DeletePoint});
 uimenu(hm,'Label','Delete mulitple points','Callback',{@DeletePoint});
 uimenu(hm,'Label','Make Histogram','Callback',{@MakeHist});
@@ -71,10 +76,11 @@ DATA = get(gcf,'UserData');
 pt = get(gca,'CurrentPoint');
 if (length(DATA.axptsx) < 4 || DATA.scaled == 0) & isfield(DATA,'ranges')
     ranges = DATA.ranges;
-DATA.axptsx = [DATA.axptsx pt(1,1)];
-DATA.axptsy = [DATA.axptsy pt(1,2)];
-hold on;
-plot(pt(1,1),pt(1,2),'g+');
+    DATA.axptsx = [DATA.axptsx pt(1,1)];
+    DATA.axptsy = [DATA.axptsy pt(1,2)];
+    hold on;
+    plot(pt(1,1),pt(1,2),'g+');
+    title(sprintf('Click on axes limits %d/%d Done',length(DATA.axptsx),4));
    if length(DATA.axptsx) >= 4
        if isfield(DATA,'imrange')
            imrange = DATA.imrange;
@@ -122,7 +128,15 @@ end
 set(gcf,'UserData',DATA);
 if length(DATA.x) & DATA.state.showduplicate
 GetFigure('Duplicate');
+colors = mycolors;
+hold off;
 plot(DATA.x,DATA.y,'o');
+for j = 1:length(DATA.allx)
+    hold on;
+    plot(DATA.allx{j},DATA.ally{j},'o','color',colors{j});
+end
+    
+title(sprintf('%d Data points',length(DATA.x)));
 end
 
 function MakeHist(a,b)
@@ -132,7 +146,7 @@ GetFigure('Duplicate');
 hold off;
 y = round(DATA.y);
 w = mean(diff(DATA.x));
-x = min(DATA.x):mean(diff(DATA.x)):max(DATA.x);
+x = min(DATA.x):(max(DATA.x)-min(DATA.x))/(length(DATA.x)-1):max(DATA.x);
 bar(x,y,1);
 set(gca,'xlim',DATA.ranges([1 3]),'ylim',DATA.ranges([2 4]));
 pts = [];
@@ -155,6 +169,14 @@ DATA = get(gcf,'UserData');
 DATA.axptsx = [];
 DATA.axptsy = [];
 title('Click on axes limits to set scale');
+set(gcf,'UserData',DATA);
+
+function AddLine(a,b)
+DATA = get(gcf,'UserData');
+DATA.allx{end+1} = DATA.x;
+DATA.ally{length(DATA.allx)} = DATA.y;
+DATA.x = [];
+DATA.y = [];
 set(gcf,'UserData',DATA);
 
 function DeletePoint(a,b)

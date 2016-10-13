@@ -1,16 +1,31 @@
 function varargout = AddEllipse(F,varargin)
-DATA = GetDataFromFig(F);
+%adds an ellipse to a figure interactively
+%AddEllipse(fig) returns immediately
+%once drawn, adds appdata 'InteractiveEliipse' to the figure
+%AddEllipse(fig, 'wait') waits for the user to draw the ellipse, then
+%            returns a structure defining the ellipse. Time out after 10s
+%AddEllipse(fig, 'wait', x) sets the timeout to x. If the timeout is NaN,
+%it waits forever
+%  
+
+
 getresp = 0;
 timeout = 10;
 shape = 0;
 plotargs = {};
 j = 1;
+appstr = 'InteractiveEllipse';
+mousept = getappdata(F, appstr);
 while j <= length(varargin)
     if strncmpi(varargin{j},'get',3)
-        varargout{1} = DATA.elmousept;
+        varargout{1} = mousept;
         return;
     elseif strncmpi(varargin{j},'wait',4)
         getresp = 1;
+        if length(varargin) > j && isnumeric(varargin{j+1})
+            j = j+1;
+            timeout = varargin{j};
+        end
     elseif strncmpi(varargin{j},'line',4)
         shape = 1;
     elseif strncmpi(varargin{j},'timeout',6)
@@ -22,23 +37,31 @@ while j <= length(varargin)
     j = j+1;
 end
 
-DATA.elmousept.h= -1;
-DATA.elmousept.shape= shape;
-DATA.elmousept.down = 0;
-DATA.elmousept.done = 0;
-DATA.elmousept.plotargs = plotargs;
-DATA.elmousept.dragfcn = get(F,'WindowButtonMotionFcn');
+
+mousept.starttime = now;
+mousept.showtimes = 0;
+if ~isfield(mousept,'h')
+    mousept.h= -1;
+end
+mousept.shape= shape;
+mousept.down = 0;
+mousept.done = 0;
+mousept.plotargs = plotargs;
+mousept.dragfcn = get(F,'WindowButtonMotionFcn');
 %should get old Fcns, then reset them after button release
 set(F, 'WindowButtonDownFcn',@ButtonPressed);
 set(F, 'WindowButtonMotionFcn',@ButtonDragged);
 set(F, 'WindowButtonUpFcn',@ButtonReleased);
 set(F, 'WindowScrollWheelFcn',@ScrollWheel);
-set(F,'UserData',DATA);
-
+setappdata(F,appstr, mousept);
+if mousept.showtimes
+            mytoc(mousept.starttime);
+end
+figure(F);
 if getresp
     waited = 0;
-    while DATA.elmousept.done == 0
-        DATA = GetDataFromFig(F);
+    while mousept.done == 0
+        mousept = getappdata(F,appstr);
         pause(0.05);
         waited = waited + 0.05;
         if waited > timeout
@@ -46,7 +69,7 @@ if getresp
             return;
         end
     end
-    varargout{1} = DATA.elmousept;
+    varargout{1} = mousept;
 end
 
 function h= DrawEllipse(E,varargin)
@@ -88,34 +111,50 @@ end
 
 
 function ButtonPressed(src, data)
-DATA = GetDataFromFig(src);
+appstr = 'InteractiveEllipse';
+mousept = getappdata(src,appstr);
 
+if isfield(mousept,'h') && ishandle(mousept.h)
+    delete(mousept.h);
+    mousept.h = -1;
+end
+
+
+%if mousept.showtimes
+%    mytoc(mousept.starttime);
+%end
 start = get(gca,'CurrentPoint');
-DATA.elmousept.down = 1;
-DATA.elmousept.pos =[start(1,1) start(1,2) 0 0 ];
-DATA.elmousept.axis = gca;
-set(src,'UserData',DATA);
+mousept.down = 1;
+mousept.pos =[start(1,1) start(1,2) 0 0 ];
+mousept.axis = gca;
+setappdata(src,appstr,mousept);
+%if mousept.showtimes
+%    mytoc(mousept.starttime);
+%end
 
 function ButtonReleased(src, data)
-DATA = GetDataFromFig(src);
+appstr = 'InteractiveEllipse';
+mousept = getappdata(src,appstr);
+
 start = get(gca,'CurrentPoint');
-DATA.elmousept.down = 0;
-DATA.elmousept.done = 1;
-p = DATA.elmousept.pos;
-DATA.elmousept.xyr = [mean(p([1 3])) mean(p([2 4])) diff(p([1 3]))/2 diff(p([2 4]))/2]; 
-if isfield(DATA.elmousept,'dragfcn')
-set(src, 'WindowButtonMotionFcn',DATA.elmousept.dragfcn);
+mousept.down = 0;
+mousept.done = 1;
+p = mousept.pos;
+mousept.xyr = [mean(p([1 3])) mean(p([2 4])) diff(p([1 3]))/2 diff(p([2 4]))/2]; 
+if isfield(mousept,'dragfcn')
+set(src, 'WindowButtonMotionFcn',mousept.dragfcn);
 end
-set(src,'UserData',DATA);
+setappdata(src,appstr, mousept);
 
 function ButtonDragged(src, data)
-DATA = GetDataFromFig(src);
+appstr = 'InteractiveEllipse';
+mousept = getappdata(src,appstr);
 
-if isfield(DATA,'elmousept') && DATA.elmousept.down > 0
+if isfield(mousept,'down') && mousept.down > 0
     start = get(gca,'CurrentPoint');
-    DATA.elmousept.pos(3) = start(1,1);
-    DATA.elmousept.pos(4) = start(1,2);
-    DATA.elmousept.h = DrawEllipse(DATA.elmousept, DATA.elmousept.plotargs{:});
+    mousept.pos(3) = start(1,1);
+    mousept.pos(4) = start(1,2);
+    mousept.h = DrawEllipse(mousept, mousept.plotargs{:});
 end
-set(src,'UserData',DATA);
+setappdata(src,appstr, mousept);
 

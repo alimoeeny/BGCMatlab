@@ -3,6 +3,7 @@ function result = PlotExptSpikes(Expt, varargin)
 % Plots the spike waveforms belongint to an Expt.  Finds them
 % on the disk first, includeing for cells build with dirrent 
 % probes etc.
+%This is out of date - for swatch recordings, not FullV spk files 
 Spks = [];
 AllSpikes = {};
 preperiod = 500;

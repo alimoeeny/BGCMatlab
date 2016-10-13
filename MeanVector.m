@@ -7,10 +7,13 @@ function r = MeanVector(lens, angles, varargin)
 
 
 dbl = 1;
+rmbase = 0;
 j = 1;
 while j <= length(varargin)
     if strncmpi(varargin{j},'double',5)
         dbl = 2;
+    elseif strncmpi(varargin{j},'rmbase',5) %remove spont rate/baseilne
+        rmbase = 1;
     elseif strncmpi(varargin{j},'selftest',5)
         TestMeanVector(1);
         return;
@@ -29,6 +32,13 @@ if sum(size(angles) == size(lens)) ~= length(size(angles))
 end
 
 id = find(~isinf(lens) & ~isinf(angles));
+if rmbase
+    zid = find(isinf(angles));
+    if ~isempty(zid)
+        lens(id) = lens(id) - mean(lens(zid));
+    end
+end
+
 angles = dbl .* angles .* pi/180;
 r = lens .* cos(angles) + i .*lens .* sin(angles);
 r = mean(r(id))./mean(abs(r(id)));

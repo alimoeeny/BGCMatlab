@@ -1,34 +1,117 @@
 function result = PlotResult(result, varargin)
-%PlotResult(result) replots a result returned by PlotExpt()
+%result = PlotResult(result) replots a result returned by PlotExpt()
+%PlotResult(...,'bvals',c)  only plot columns c in result.means
+%PlotResult(...,'cvals',c)  only dimension3 ==  c in result.means
+%           ...,'legendpos',L) calls legend(... 'location', L)
 getcp = 1;
 nresample = 0;
 npsych = 5;
 getem = 0;
 holdon = 0;
 showseq = 0;
+plottype = 'default';
+figtag = '';
+legendplace = '';
+strargs = cell2cellstr(varargin);
+state.frtest = 0; 
+newids = [];
+parentfigure = [];
 j = 1;
 while j <= length(varargin)
+    if strncmpi(varargin{j},'parentfigure',6)
+        j = j+1;
+        parentfigure = varargin{j};
+    elseif sum(strncmpi(varargin{j},{'figtag' 'tag'},3))
+        j = j+1;
+        GetFigure(varargin{j});
+        figtag = varargin{j};
+    elseif strncmpi(varargin{j},'fano',4)
+        plottype = varargin{j};
+    elseif strncmpi(varargin{j},'legendloc',8)
+        j = j+1;
+        legendpos = varargin{j};
+    elseif strncmpi(varargin{j},'Fr',2)
+        j = j+1;
+        state.frtest = varargin{j};
+    elseif strncmpi(varargin{j},'polar',4)
+        plottype = 'polar';
+    elseif strncmpi(varargin{j},'newids',6)
+        j = j+1;
+        newids = varargin{j};
+    end
     j = j+1;
 end
 
-if isfield(result,'DATA')
+if isfigure(result) %get an appdata and plot that
+    F = result;
+    Expt = expt.GetExpt(result,'keep');
+    if isfield(Expt,'plotres')
+        result = Expt.plotres;
+    end
+    if isempty(figtag)
+        figtag = sprintf('From Figure %d',double(F));
+        GetFigure(figtag);
+        varargin = {varargin{:} 'tag' figtag};
+    end
+    if sum(strcmp('combine',strargs))
+        Expt = expt.GetExpt(F,'keep','combine');
+        result = PlotExpt(Expt,'fbox','rcnmin',2);
+        Expt.plotres = result;
+    end
+end
     
-Trials = result(1).Data.Trials;
-[Trials.e0] = deal(0);
+if isfield(result,'Data')
+    Expt = result(1).Data;
+    Trials = result(1).Data.Trials;
+    [Trials.e0] = deal(0);
+    if ~isfield(Trials,'RespDir')
+       PlotExptRes(result,plottype,varargin{:});
+        return;
+    end
+elseif iscell(result)
+   if isfield(result{1},'plotres') && isfield(result{1}.plotres(1),'x')
+       PlotExptRes(result{1}.plotres,plottype,varargin{:});
+   else
+       fprintf('%s Missing Data for plot \n',IDString(result{1}));
+   end
+   return;
+elseif isfield(result,'cp')
+elseif isfield(result,'fittype') || isfield(result,'fitslope') % From FitExpt
+    PlotExptFit(result);
+    return;
+    %old way
+    result.duration = 1;
+    result.means = result.resp;
+    result.sd = result.sem .* sqrt(result.n);
+    result.type = {'dx' 'ce'};
+    PlotExptRes(result,plottype,varargin{:});
+    return;
 else
-    PlotExptRes(result);
+    if ~isempty(newids)
+        result = RecalcResult(result, newids,varargin{:});
+    end
+    PlotExptRes(result,plottype,varargin{:});
     return;
 end
 
 %
-% eed to determine which value of exp is pref, and which value of
+% need to determine which value of exp is pref, and which value of
 % exp2 is ambigous. If maxob is set, this is an expt where large values
 % of exp2 are the ambiguous ones. If Maxob is Nan, the smallest value of
 % expt2 (usually 0) is ambiguous
 maxob = NaN;
 minob = NaN;
 sigsign = 1;
-if strcmp(result(1).type{2}, 'ob')
+if strcmp(result(1).type{1}, 'cvsign')
+    maxob = 100;
+    ctype = 'e0';
+    ptype = result(1).type{1};
+    if max([Trials.ob]) < maxob
+        maxob = max([Trials.ob]) - 10;
+    end
+    e2vals = [Trials.or];
+    e1vals = [Trials.cvsign];
+elseif strcmp(result(1).type{2}, 'ob')
     maxob = 100;
     ctype = 'or';
     ptype = result(1).type{2};
@@ -68,6 +151,10 @@ elseif strcmp(result(1).type{1},'Dc')
     ptype = ctype;
     minob = min(e2vals);
     sigsign = 1;
+elseif isfield(result,'fittype');
+    e1vals = result.x;
+    e2vals = result.y;
+    maxob = NaN;
 else
     e1vals = [Trials.(result(1).type{1})];
     e2vals = [Trials.(result(1).type{2})];
@@ -78,7 +165,13 @@ end
 if isnan(minob)
     minob = min(e2vals);
 end
-if isnan(maxob)
+
+if length(result(1).type) < 2 || strcmp(result(1).type{2},'e0')
+    pidx = find(e1vals == 0 & [Trials.RespDir] < 0 & [Trials.Trial] > 0);
+    nidx = find(e1vals == 0 & [Trials.RespDir] > 0 & [Trials.Trial] > 0);
+    goodidx = find(e2vals >0 & [Trials.RespDir] .*  [Trials.rwdir] == 1 & [Trials.Trial] > 0);
+    erridx = find(e2vals > 0 & [Trials.RespDir] .* [Trials.rwdir] == -1 & [Trials.Trial] > 0);
+elseif isnan(maxob)
     pidx = find(e2vals == minob & [Trials.RespDir] < 0 & [Trials.Trial] > 0);
     nidx = find(e2vals == minob & [Trials.RespDir] > 0 & [Trials.Trial] > 0);
     goodidx = find(e2vals >0 & [Trials.RespDir] .*  [Trials.rwdir] == 1 & [Trials.Trial] > 0);
@@ -93,6 +186,25 @@ xs = unique([Trials.(ctype)]);
 ps = unique([Trials.(ptype)]);
 
 
+if strcmp(ctype,'e0')
+    for j = 1:2;
+        if j ==1
+        idx = find(e1vals > 0);
+        else
+        idx = find(e1vals > 0);
+        end
+        bestrates(j) = mean([Trials(idx).count]);
+        rates(j) = mean([Trials(idx).count]);
+        choices(j) = mean([Trials(idx).RespDir]);
+        vars(j) = var([Trials(idx).count]);
+        bestn(j) = length(idx);
+        if isfield(Trials,'vs') % hn 12/4/07
+            dirs(j) = mean([Trials(idx).vs]);
+        elseif isfield(Trials,'sq')
+            dirs(j) = mean([Trials(idx).sq]);
+        end
+    end
+else
 
 for j = 1:length(xs)
     if sigsign < 0
@@ -112,7 +224,7 @@ for j = 1:length(xs)
     vars(j) = var([Trials(idx).count]);
     bestn(j) = length(idx);
 end
-
+end
 %if rates(1) is highest, pref stim is #1
 %if dirs(1) < dirs(end) means this stim was the negative saccade,
 %which is Positive respdir.  So swap pidx, nidx. same if both signs
@@ -263,9 +375,10 @@ else
     blocks = [];
 end
     
-if ~holdon
-    hold off;
-    
+if holdon
+    hold on;
+else
+    hold off;  
 end
     for j = 1:length(Trials)
         starts(j) = Trials(j).Start(1);
@@ -360,24 +473,95 @@ end
     
    
     
-function PlotExptRes(res)
+function res = PlotExptRes(res,plottype,varargin)
         
+coloroffset = [];
+showcounts = 1;
+j = 1;
+cvals= [];
+bvals= [];
+allh = [];
+facecolors = [];
+figtag = '';
+holdon = 0;
+useoldcolors = 1; %by default, use colors that PlotExpt did
+colors = mycolors;
+linestyles = {};
+legendloc = '';
+while j <=length(varargin)
+    if strncmpi(varargin{j},'coloroff',8)
+        j = j+1;
+        coloroffset = varargin{j};
+    elseif strncmpi(varargin{j},'bvals',4)
+        j = j+1;
+        bvals = varargin{j};
+    elseif strncmpi(varargin{j},'cvals',4)
+        j = j+1;
+        cvals = varargin{j};
+    elseif strncmpi(varargin{j},'colors',4)
+        j = j+1;
+        colors(1:length(varargin{j})) = varargin{j};
+        useoldcolors = 0;
+        if length(varargin) > j && iscell(varargin{j+1})
+            facecolors = varargin{j+1};
+        end
+    elseif strncmpi(varargin{j},'hold',4)
+        holdon = 1;
+    elseif strncmpi(varargin{j},'legendpos',8)
+        j = j+1;
+        legendloc = varargin{j};
+    elseif strncmpi(varargin{j},'linestyles',6)
+        j = j+1;
+        if iscell(varargin{j})
+            linestyles = varargin{j};
+        else
+            for k = 1:length(colors)
+                linestyles{k}= varargin{j};
+            end
+        end
+    elseif strncmpi(varargin{j},'nocounts',5)
+        showcounts = 0;
+    elseif strncmpi(varargin{j},'tag',3)
+        j = j+1;
+        figtag = varargin{j};
+    end
+    j = j+1;
+end
         
      if iscell(res)
          for j = 1:length(res)
-             PlotExptRes(res{j});
+             PlotExptRes(res{j},plottype,varargin{:});
          end
          return;
      end
-     colors = mycolors;
+     
+     if strcmp(plottype,'acxc')
+         PlotACResult(res, 'xcorr');
+         return;
+     end
      symbols = 'ososooooooooooooooooooooooooooooo';
      linestyle = {'-',':','-.','--'};
      fillsymbols = 1;
-     
-        
-      if isfield(res,'x2') && res.x2 == 0  
-        
-           for nc = 1:size(res.x,3)
+
+     selectvals = [length(bvals) length(cvals)];
+      labels = {};  
+      if ~isempty(figtag)
+          GetFigure(figtag);
+      end
+      lpos = GetLegendPos(gcf);
+      if holdon
+          hold on;
+      else
+          hold off;
+      end
+
+     if isfield(res,'bestdelay')
+         [a,b,details]  = PlotRC(res, 'sdf', 'labela',gcf, varargin{:});
+         if ~isempty(details) %don't change title if nothing was plotted
+             title(IDString(res,'trialcount'));
+         end
+     elseif isfield(res(1),'x2') && res(1).x2 == 0  
+           for nc = 1:size(res(1).x,3)
        nx = sum(res.n(:,:,nc),1);
        ny = sum(res.n(:,:,nc),2);
        [a,xi] = max(nx);
@@ -397,6 +581,7 @@ function PlotExptRes(res)
        set(er,'color',colors{2},'linestyle',linestyle{nc});
        res.allhandles = [res.allhandles er];
        allh(nc) = plot(res.y(yi,:,nc),res.means(yi,:,nc),symbols(nc),'color',c);
+       cpoint = mean(res.x(:));
        labels{nc} = num2str(res.z(1,1,nc));
            set(allh,'MarkerFaceColor',colors{2});
        
@@ -404,31 +589,210 @@ function PlotExptRes(res)
                    for j = 1:length(res(1).extras.means)
             if res(1).extras.n(j) > 0
                 c =colors{j};
-            errorbar(0,res(1).extras.means(j),res(1).extras.sd(j),'color',colors{j});
-            h = plot(0,res(1).extras.means(j),'o','color',colors{j});
+            errorbar(cpoint,res(1).extras.means(j),res(1).extras.sd(j)./sqrt(res(1).extras.n(j)),'color',colors{j});
+            hold on;
+            h = plot(cpoint,res(1).extras.means(j),'o','color',c);
             set(h,'MarkerFaceColor',c);
             end
                    end
-        mylegend(allh,labels);
+        lh = mylegend(allh,labels);
       else
-        for k= 1:size(res(1).x,3)
-        for j= 1:size(res(1).x,2)
-            if isfield(res,'colors')
-                c = res.colors{j,k};
-            else
-                c = colors{j};
+       cpoint = mean(res(1).x(:));
+       if isempty(cvals)
+           cvals = 1:size(res(1).x,3);
+       end
+       if isempty(bvals)
+           bvals = 1:size(res(1).means,2);
+       end
+       np = 1;
+       dur = res(1).duration./10000;
+            if strcmp(plottype,'fano')
+                F = gcf;
+                GetFigure('Fano Factors');
+                hold off;
+                figure(F);
             end
-            errorbar(res(1).x(:,j,k),res(1).means(:,j,k),res(1).sd(:,j,k)./sqrt(res(1).n(:,j,k)),'color',c);
-            hold on;
-            plot(res(1).x(:,j,k),res(1).means(:,j,k),'o','color',c,'MarkerFaceColor',c);
+        for k= cvals(:)';
+        for j= bvals(:)';
+            if sum(selectvals > 0) > 1 || useoldcolors ==0 %if forcing colors, use order of lines plotted here
+                ci = np;
+            elseif length(bvals) == 1
+                ci = k;
+            else
+                ci = j;
+            end
+            if ~isempty(coloroffset)                
+                c = colors{ci+coloroffset};
+            elseif isfield(res,'colors') && useoldcolors
+                if length(bvals) > 1  %color shows Cval
+                    c = res(1).colors{j,k};
+                else
+                    c = res(1).colors{k,1};
+                end
+            else
+                c = colors{ci};
+            end
+            if isempty(facecolors)
+                fc = c;
+            else
+                fc = facecolors{ci};
+            end
+            if strcmp(plottype,'fano')
+                x = res(1).x(:,j,k);                
+                ff = res(1).sd.^2./res(1).means;
+                rates = res(1).means./dur;
+                ratesd = (res(1).sd./dur);
+                ratesem = ratesd./sqrt(res.n);
+                l = plot(rates(:,j,k),ratesem(:,j,k),'o',...
+                    'color',c,'markerfacecolor',c);
+                psd = rates./(res(1).n .* dur);
+                psd = sqrt(psd);
+                off = ratesem./psd;
+                hold on;
+                plot(rates(:,j,k),psd(:,j,k),'-','color',c);
+                dx = diff(minmax(range(rates(:))))./50;
+                F = gcf;
+                GetFigure('Fano Factors')
+                plot(rates(:,j,k),ff(:,j,k),'o','color',c');
+                hold on;
+                figure(F);
+                res.ff = ff;
+            elseif strcmp(plottype,'polar')
+                dx = range(res(1).x(:,j,k))./50;
+                if np ==1 %polar and hold don't update axis range, so plot largest first
+                    [a,b] = max(res(1).means(:,bvals,cvals));
+                    [ai,d] = max(a);
+                    a = res(1).x(:,bvals(d),k) .* pi./180;
+                    b = res(1).means(:,bvals(d),k);                    
+                    polar(a,b); 
+                    hold on;
+                end
+                a = res(1).x(:,j,k) .* pi./180;
+                b = res(1).means(:,j,k);
+                a = [a(:)' a(1)];
+                b = [b(:)' b(1)];
+                allh(j,k) = polar(a,b);
+                set(allh(j,k),'color',c,'marker','o','MarkerFaceColor',fc);
+                if length(linestyles) >= np
+                    set(allh(j,k),'linestyle',linestyles{np});
+                end
+                hold on;
+            else
+                if ndims(res(1).x) > 2
+                    x = res(1).x(:,j,k);
+                    y = res(1).y(:,j,k);
+                elseif min(size(res(1).x)) > 1
+                    x = res(1).x(:,j);
+                    y = res(1).y(:,j);                    
+                else
+                    x = res(1).x;
+                    y = res(1).y;
+                end
+                l = errorbar(x,res(1).means(:,j,k),res(1).sd(:,j,k)./sqrt(res(1).n(:,j,k)),'color',c);
+                if k > 1 && length(bvals) > 1
+                    set(l,'linestyle','--');
+                end
+                hold on;
+                dx = range(x)./50;
+                allh(j,k) = plot(x,res(1).means(:,j,k),'o','color',c,'MarkerFaceColor',c);
+            end
+            if sum(selectvals > 0) > 1
+                labels{j,k} = sprintf('%s=%.1f %s=%.1f',res(1).type{3},res(1).z(1,1,k),res(1).type{2},res(1).y(1,j,1));
+            elseif length(cvals) > length(bvals)
+                labels{k} = sprintf('%s=%.1f',res(1).type{3},res(1).z(1,1,k));
+            elseif length(res(1).type) > 1
+                if isfield(res,'legend') && length(res(1).legend.labels) == size(res(1).y,2)
+                    labels{j} = res(1).legend.labels{j};
+                else
+                    labels{j} = sprintf('%s=%.1f',res(1).type{2},mean(res.y(:,j)));
+                end
+            end
+            if showcounts
+               h = text(x+dx,res(1).means(:,j,k),num2str(res(1).n(:,j,k)),...
+                    'horizontalalignment','left','verticalalignment','bottom');
+            end
+            np = np+1;
         end
         end
         for j = 1:length(res(1).extras.means)
+            c =colors{j};
             if res(1).extras.n(j) > 0
-            errorbar(0,res(1).extras.means(j),res(1).extras.sd(j),'color',colors{j});
+            errorbar(cpoint,res(1).extras.means(j),res(1).extras.sd(j)./sqrt(res(1).extras.n(j)),'color',colors{j});
+            h = plot(cpoint,res(1).extras.means(j),'o','color',c);
+            set(h,'MarkerFaceColor',c);
             end
         end
-      end
-      if isfield(res,'title')
-          title(res.title);
-      end
+     end
+     if ~isempty(allh)
+         if sum(selectvals > 0) > 1
+             lh = mylegend(allh,labels);
+         elseif length(cvals) > length(bvals)
+             lh = mylegend(allh(bvals(1),:),labels);
+         else
+             lh = mylegend(allh(:,1),labels);
+         end
+         if ~isempty(legendloc)
+             set(lh,'location',legendloc);
+         elseif myhandle(lh) && ~isempty(lpos)
+             x = get(lh,'position');
+             x(1:2) = lpos(1:2);
+             set(lh,'position',x);
+         end
+         if isfield(res,'title')
+             title(res(1).title);
+         end
+     end
+      
+      
+function E = RecalcResult(E, ids, varargin)
+% E = RecalcResult(E, ids)
+%recalculates a PlotExpt Result using only a subset of Trials
+%
+
+dosqrt = 0;
+j = 1;
+while j <= length(varargin)
+    if strncmp(varargin{j},'sqrt',4)
+        dosqrt = 1;
+    end
+    j = j+1;
+end
+
+for j = 1:length(E.x(:))
+    [a, tid] = intersect(E.ids{j},ids);
+    if dosqrt == 1
+        E.means(j) = mean(sqrt(E.counts{j}(tid)));
+        E.sd(j) = std(sqrt(E.counts{j}(tid)));
+    else
+        E.means(j) = mean(E.counts{j}(tid));
+        E.sd(j) = std(E.counts{j}(tid));
+    end
+    E.n(j) = length(tid);
+end
+    
+for j = 1:length(E.extras.id)
+    [a, tid] = intersect(E.extras.id{j},ids);
+    if dosqrt == 1
+        E.extras.means(j) = mean(sqrt(E.extras.counts{j}(tid)));
+        E.extras.sd(j) = std(sqrt(E.extras.counts{j}(tid)));
+    else
+        E.extras.means(j) = mean(E.extras.counts{j}(tid));
+        E.extras.sd(j) = std(E.extras.counts{j}(tid));
+    end
+    E.extras.n(j) = length(tid);
+end
+    
+function pos = GetLegendPos(F)
+pos = [];
+
+c = get(F,'children');
+t = get(c,'type');
+a = find(strcmp('legend',t));
+if ~isempty(a)
+    pos = get(c(a),'position');
+end
+
+
+
+      
+      

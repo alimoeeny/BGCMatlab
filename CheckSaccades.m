@@ -74,9 +74,12 @@ for j = 1:length(Expt.Trials)
         end
     end
     Saccades = [];
-    if useeyes == 0
-    ch = (Expt.Trials(j).EyeData(:,1) + Expt.Trials(j).EyeData(:,2))/2;
-    cv = (Expt.Trials(j).EyeData(:,3) + Expt.Trials(j).EyeData(:,4))/2;
+    if isempty(Expt.Trials(j).EyeData)
+        ch = zeros(1,len);
+        cv = zeros(1,len);
+    elseif useeyes == 0
+        ch = (Expt.Trials(j).EyeData(:,1) + Expt.Trials(j).EyeData(:,2))/2;
+        cv = (Expt.Trials(j).EyeData(:,3) + Expt.Trials(j).EyeData(:,4))/2;
     elseif useeyes == 1
         ch = Expt.Trials(j).EyeData(:,1);
         cv = Expt.Trials(j).EyeData(:,3);
@@ -139,7 +142,12 @@ for j = 1:length(Expt.Trials)
         end
     end
     end
-    Expt.Trials(j).Saccades = Saccades;
+    if size(Saccades,1) > 1
+        Expt.Trials(j).Saccades = Saccades;
+    else
+        Expt.Trials(j).Saccades = Saccades;
+    end
+    
 end
 
 if ~isfield(Expt.Header,'emtimes')

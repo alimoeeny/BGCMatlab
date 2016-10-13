@@ -67,7 +67,7 @@ psychtag = 'Psych';
 symbols = 'ooooooooooooooooooooooooooooooooo';
 lfprange = [30 60 200 10 4];
 nlfp = 1;
-linestyle = {'-',':','-.','--'};
+linestyle = {'-',':','-.','--','-', ':', '-.', '--' };
 nline = 1;
 nolines = 0;
 acov = 0;
@@ -81,7 +81,7 @@ postperiod = 2000;
 includebad = 0; %set to 1 to include invalid saccade trials for tuning curves
 result = [];
 colorids = [];
-
+allidx = {};
 
 if isstruct(type)
     result = type;
@@ -138,6 +138,8 @@ j = 1;
         type = varargin{j};
     elseif strncmpi(str,'showmu',5)
         showmu = 0;
+    elseif strncmpi(str,'box',3)
+        sdfargs = {sdfargs{:} varargin{j}};
     elseif strncmpi(str,'block',5)
       j = j+1;
       block = varargin{j};
@@ -253,7 +255,11 @@ elseif strncmpi(str,'Psych',4)
         result = [];
           return;
     end
-
+    if ~isfield(Expt.Trials,'Id')
+        for t = 1:length(Expt.Trials)
+            Expt.Trials(t).id = Expt.Trials(t).Trial;
+        end
+    end
 %RespDir -1 = upward saccade (vs positive), = FAR choice for disparity task  
 %for cylinder task this make a mess meaning of RespDir changes at 90/-90
 % call with 'psychflip'
@@ -297,8 +303,9 @@ elseif strncmpi(str,'Psych',4)
       dExpt.Trials = Expt.Trials(idx);
       if ~isempty(uidx)
           [ures, exp] = PlotRates(uExpt,type,'fillall','xval',xvs,args{:});
-          for tr = 1:length(uidx)
-              Expt.Trials(uidx(tr)).count = exp.Trials(tr).count;
+          for tr = 1:length(exp.Trials)
+              tid = find([Expt.Trials.Trial] == exp.Trials(tr).Trial);
+              Expt.Trials(tid).count = exp.Trials(tr).count;
           end
           ures.RespDir = mean([uExpt.Trials.RespDir]);
           if showplot
@@ -308,8 +315,10 @@ elseif strncmpi(str,'Psych',4)
       if ~isempty(idx) & ~isempty(uidx)
           [dres, exp] = PlotRates(dExpt,type,'Nofill','fillall','xval',xvs,args{:},'line',2,'hold','nmin',1);
           errstr = [];
-          for tr = 1:length(idx)
-              Expt.Trials(idx(tr)).count = exp.Trials(tr).count;
+%sometimes trials in dExpt Get removed from exp if there is an error (see dae558, Trial(1))          
+          for tr = 1:length(exp.Trials)
+              tid = find([Expt.Trials.Trial] == exp.Trials(tr).Trial);
+              Expt.Trials(tid).count = exp.Trials(tr).count;
           end
           npvals = min([size(dres.counts,1) size(ures.counts,1)]);
           dres.RespDir = mean([dExpt.Trials.RespDir]);
@@ -375,6 +384,8 @@ elseif strncmpi(str,'Psych',4)
               if sethold == 0
               hold off;
               end
+              pres = ExptPsych(Expt,'forcecolor',colors{1});
+              showplot = 2;
           end
           if strcmp(Expt.Stimvals.e2,'Id') || strcmp(Expt.Stimvals.e2,'e0')
               for k = 1:size(dres.psum,2)
@@ -441,7 +452,7 @@ elseif strncmpi(str,'Psych',4)
               end
               if length(psf) > 1
                   fit = fitpsf(psf);
-                  if showplot
+                  if showplot == 1 %now plotted with ExptPsych
                       plot([psf.x],[psf.resp]./[psf.n],'o','color',colors{k});
                       h = fitpsf(fit.data,'showfit',fit,psfargs{:},'color',colors{1});
                       fit.fith = h.fith;
@@ -449,12 +460,12 @@ elseif strncmpi(str,'Psych',4)
                       title(sprintf('Bias %.1f, Slope %.3f',fit.fit(1),abs(fit.fit(2))));
                   end
               dres.psych = fit;
-              ures.psych = [];
+              ures.psych = fit;
               else
                   dres.psych = [];
                   ures.psych = [];
               end
-          elseif strmatch(Expt.Stimvals.e2,'ob') && ~strcmp(type,'cvsign')
+          elseif strcmp(Expt.Stimvals.e2,'ob') && ~strcmp(type,'cvsign')
               id = find([Expt.Trials.ob] > 120);
               if isfield(Expt.Trials,'se')
               [a,details] = CalcConsistency(Expt.Trials(id));
@@ -484,8 +495,6 @@ elseif strncmpi(str,'Psych',4)
               ures.psych = [];
 %              plot(sd2cv(dres.psychval) .*sgn,dres.presp./dres.psum,'o');
           else
-              if showplot
-                  plot(dres.psychval,dres.presp./dres.psum,'o');
                   for j = 1:size(dres.x,1)
                       pp(j).x = dres.x(j);
                       pp(j).n = dres.psum(j);
@@ -493,7 +502,9 @@ elseif strncmpi(str,'Psych',4)
                   end
                   fit = fitpsf(pp);
                   dres.psych = fit;
-                  ures.psych = [];
+                  ures.psych = fit;
+              if showplot == 1
+                  plot(dres.psychval,dres.presp./dres.psum,'o');
                   if isfield(fit,'data')
                       h = fitpsf(fit.data,'showfit',fit,psfargs{:},'color',colors{1});
                   end
@@ -552,6 +563,10 @@ elseif strncmpi(str,'Psych',4)
       elseif strncmpi(str,'lfpt',4)
           plotlfp = 2;
       end
+  elseif strncmpi(str,'Trialids',8)
+      j = j+1;
+      tid = find(ismember([Expt.Trials.id],varargin{j}));
+      Expt.Trials = Expt.Trials(tid);
   elseif strncmpi(str,'Trials',3)
       j = j+1;
       Expt.Trials = Expt.Trials(varargin{j});
@@ -623,7 +638,9 @@ elseif strncmpi(str,'Psych',4)
   elseif strncmpi(str,'ShowN',5)
       showcounts = 1;
       psfargs = {psfargs{:}, 'showN'};
-  elseif strncmpi(str,'xval',4)
+  elseif strncmpi(str,'useall',6) %include RespDir = 0 trials in tuning curve
+      includebad = 1;
+    elseif strncmpi(str,'xval',4)
       j = j+1;
       xvs = varargin{j};
       forcexvs = 1;
@@ -698,7 +715,11 @@ Expt = FillExpt(Expt, type); %make sure stimval is set in case n == 1
 stimtype = GetEval(Expt,'st','mode');
 [eye, eyes] = GetEval(Expt,'me','mode');
 if isempty(duration)
-    duration = prctile([Expt.Trials.End] - [Expt.Trials.Start],50);
+    if isfield(Expt.Trials,'dur')
+        duration = prctile([Expt.Trials.dur],50);
+    else
+        duration = prctile([Expt.Trials.End] - [Expt.Trials.Start],50);
+    end
 else
     id = find([Expt.Trials.End]- [Expt.Trials.Start] > duration * 0.98);
     Expt.Trials = Expt.Trials(id);
@@ -731,7 +752,9 @@ end
 
 result.type{1} = type;
 if exist('btype','var')
-result.type{2} = btype;
+    result.type{2} = btype;
+else
+    result.type{2} = 'e0';
 end
 if exist('ctype','var')
 result.type{3} = ctype;
@@ -781,19 +804,23 @@ if isfield(Expt.Trials,'ce')
         [Expt.Trials(bid).(type)] = deal(-1005);
     end
 end
-if ~forcexvs | isempty(xvs)
-    xvs = sort(unique([Expt.Trials.(type)]));
-    xvs = xvs(find(~isnan(xvs)));
-    if strcmp(type,'dx') && max(xvs) > 100  %%mistaken highx interleave
-        id = find([Expt.Trials.(type)] >= 100);
-        [Expt.Trials(id).(type)] = deal(NaN);
-        xvs = xvs(find(xvs < 100));
+if ~forcexvs 
+    if isempty(xvs)
+        xvs = sort(unique([Expt.Trials.(type)]));
+        xvs = xvs(find(~isnan(xvs)));
+        if strcmp(type,'dx') && max(xvs) > 100  %%mistaken highx interleave
+            id = find([Expt.Trials.(type)] >= 100);
+            [Expt.Trials(id).(type)] = deal(NaN);
+            xvs = xvs(find(xvs < 100));
+        end
     end
-end
-if logx
-    mindiff = 0;
+    if logx
+        mindiff = 0;
+    else
+        [xvs, mindiff] = RemoveDuplicates(xvs,Expt);
+    end
 else
-[xvs, mindiff] = RemoveDuplicates(xvs,Expt);
+    mindiff = 0;
 end
 nn = 0;
 nsum = 0;
@@ -820,6 +847,12 @@ for ie = 1:length(extraexp)
             extra.n(ie) = length(counts(idx));
             extra.sd(ie) = std(counts(idx));
             extra.id{ie} = idx;
+            if isfield(Expt.Trials,'id')
+            extra.ids{ie} = [Expt.Trials(idx).id];
+            end
+            if mksdf == 1
+                extra.sdfs{ie} = trigsdfa(Expt.Trials(idx),sdfw,times,sdfargs{:});
+            end
             extra.counts{ie} = counts(idx);
             extraidx = [extraidx idx];
             if gettimes
@@ -841,12 +874,13 @@ for ie = 1:length(extraexp)
 end
 
 
-if plotlfp  
+if plotlfp  && isfield(Expt.Trials,'FTlfp')
     if extra.n(1) > 0
         idx = extra.id{1};
         fts = abs([Expt.Trials(idx).FTlfp]);
         ft = mean(fts,2);
         aft = mean(fts,1);
+        if length(ft) >= max(agidx);
         blanklfpwr = mean(ft(gidx));
         ablanklfpwr = mean(ft(agidx));
         bblanklfpwr = mean(ft(bgidx));
@@ -872,6 +906,7 @@ if plotlfp
         cgidx = minf:maxf;
         cblanklfpwr = mean(ft(cgidx));
         lfpautof = [ftfrq(minf) ftfrq(maxf)];
+        end
     else
         blanklfpwr = 0;
         ablanklfpwr = 0;
@@ -896,16 +931,17 @@ if exist('btype','var')
 else
   bvals = NaN;
 end
-if GetEval(Expt,'st') == 10 & isfield(Expt.Trials,'st')
+if GetEval(Expt,'st') == 10 && isfield(Expt.Trials,'st') && isfield(Expt.Trials,'sf')
     id = find([Expt.Trials.st] == 3)
     sfs = unique([Expt.Trials(id).sf]);
-    
+    if ~isempty(id)
     ida = find([Expt.Trials(id).sf] == sfs(1));
     idb = find([Expt.Trials(id).sf] == sfs(2));
     bvals = [bvals -1001];
     [Expt.Trials(id(ida)).(btype)] = deal(-1001);
     bvals = [bvals -1002];
     [Expt.Trials(id(idb)).(btype)] = deal(-1002);
+    end
 end
 
 if exist('ctype','var')
@@ -920,6 +956,27 @@ end
 result.nlines = length(bvals);
 result.duration = duration;
 h = [];
+
+if isfield(Expt.Stimvals,'expvars') && ~isfield(Expt.Header,'exptvars') && ischar(Expt.Stimvals.expvars)
+    Expt.Header.exptvars = Expt.Stimvals.expvars;
+end
+if isfield(Expt.Header,'exptvars') && ischar(Expt.Header.exptvars)
+    if isfield(Expt.Header,'conditions') && sum(Expt.Header.conditions.nstims) == length(Expt.Trials)
+        result.conditions = Expt.Header.conditions;
+        conditions = result.conditions;
+        allidx = conditions.tidx;
+        bvals = 1:size(conditions.values,1);
+    else %need to rebuild condition list
+        [a,conditions] = expt.ListConditions(Expt);
+        bvals = 1:size(a,1); %number of unique combinations
+        if ~isnan(cvals) %if NaN, no field
+            cvals = 1;
+        end
+        allidx = conditions.tidx;
+        result.conditions = conditions;
+        Expt.Header.conditions = conditions;
+    end
+end
 
 if autonmin
     for nc = 1:length(cvals)
@@ -957,6 +1014,7 @@ if logx
 end
 
 result.allhandles = [];
+xo = 0;
 
 for nc = 1:length(cvals)
     if ~isnan(cvals(nc))
@@ -964,26 +1022,31 @@ for nc = 1:length(cvals)
     else
         cidx = 1:length(Expt.Trials);
     end
-    if exist('btype','var')
-    for ie = 1:length(bvals)
-        if ~isnan(bvals(ie))
-            bidx  = eval(['find([Expt.Trials.' btype '] == bvals(ie));']);
-            nbval(ie) = length(bidx);
-        else
-            nbval(ie) = sum(isnan([Expt.trials.(btype)]));
+    if ~isempty(allidx)
+    elseif exist('btype','var')
+        for ie = 1:length(bvals)
+            if ~isnan(bvals(ie))
+                bidx  = eval(['find([Expt.Trials.' btype '] == bvals(ie));']);
+                nbval(ie) = length(bidx);
+            else
+                nbval(ie) = sum(isnan([Expt.trials.(btype)]));
+            end
         end
-    end
-    bid = find(nbval < mean(nbval/5)); %%do't allow conditions with many fewer repeats
-    bid = find(nbval > mean(nbval/5)); %%do't allow conditions with many fewer repeats
-    bvals = bvals(bid);
+        bid = find(nbval < mean(nbval/5)); %%do't allow conditions with many fewer repeats
+        bid = find(nbval > mean(nbval/5)); %%do't allow conditions with many fewer repeats
+        bvals = bvals(bid);
     end
     for ie = 1:length(bvals);
         ix = 1;
-        if ~isnan(bvals(ie))
+        if ~isempty(allidx)
+            bidx = allidx{ie};
+            cidx = bidx;
+        elseif ~isnan(bvals(ie))
             bidx  = eval(['find([Expt.Trials.' btype '] == bvals(ie));']);
         else
             bidx = 1:length(Expt.Trials);
         end
+        ccidx = setdiff(intersect(bidx,cidx),extraidx);
         result.linevals(ie,nc) = SetLineval(bvals,bvals(ie));
         result.colors{ie,nc} = colors{ie+addn};
         step = (max(xvs)-min(xvs))/50;
@@ -997,17 +1060,23 @@ for nc = 1:length(cvals)
             end
         end
 
+        newcode = 1;
         for xi = 1:length(xvs)
             x = xvs(xi);
-            %    idx = find(abs([Expt.Trials.(type)]- x) <= mindiff & [Expt.Trials.st] > 0);
-            idx = find(abs([Expt.Trials.(type)]- x) <= mindiff);
-            if Expt.Stimvals.st ~= 0
-                idx = setdiff(idx,[Expt.Trials.st] == 0);
+            if newcode
+                idx = find(abs([Expt.Trials(ccidx).(type)]- x) <= mindiff);
+                idx = ccidx(idx);
+            else
+                idx = find(abs([Expt.Trials.(type)]- x) <= mindiff & [Expt.Trials.st] > 0);
+                if Expt.Stimvals.st ~= 0 %should be covered by extraidx
+                    idx = setdiff(idx,[Expt.Trials.st] == 0);
+                end
+                idx = find([Expt.Trials.(type)] == x & [Expt.Trials.st] > 0);
+                idx = cidx(idx);
+                idx = intersect(idx,bidx);
+                idx = intersect(idx,cidx);
+                idx = setdiff(idx,extraidx);
             end
-            %     idx = find([Expt.Trials.(type)] == x & [Expt.Trials.st] > 0);
-            idx = intersect(idx,bidx);
-            idx = intersect(idx,cidx);
-            idx = setdiff(idx,extraidx);
             if (length(idx) >= nmin | fillall) & (x > 0 | ~logx)
                 if x < -999
                     x = SetLineval(xvs,x);
@@ -1033,7 +1102,11 @@ for nc = 1:length(cvals)
                 end
                 result.flags(ix,ie,nc) = 0;
                 result.counts{ix,ie,nc} = counts(idx);
-                result.ids{ix,ie,nc} = idx;
+                if isfield(Expt.Trials,'id')
+                result.ids{ix,ie,nc} = [Expt.Trials(idx).id];
+                else
+                end
+                result.tidx{ix,ie,nc} = idx;
                 if gettimes
                     result.spktimes{ix,ie,nc} = cat(1, spktimes{idx});
                 end
@@ -1086,6 +1159,9 @@ for nc = 1:length(cvals)
 
                 lfpch = 1;
                 if plotlfp
+                    if length(ft) == 0
+                        plotlfp = 2;
+                    end
                     subplot(2,1,2);
                     fts = abs([Expt.Trials(idx).FTlfp]);
                     ft = mean(abs([Expt.Trials(idx).FTlfp]),2);
@@ -1098,6 +1174,7 @@ for nc = 1:length(cvals)
                         fprintf('No Data for %s\n',stimlab);
                     else
                         if plotlfp == 2 %time domain
+                            addl = mod(addl,100);
                             ts = [1:size([Expt.Trials.LFP],1)] .* Expt.Header.LFPsamplerate;
                             lfph(nlfp) = plot(ts,mean([Expt.Trials(idx).LFP],2),'color',colors{ix+addn+addl});
                             result.lfpt(ix,ie,:) = mean([Expt.Trials(idx).LFP],2);
@@ -1106,6 +1183,7 @@ for nc = 1:length(cvals)
                         end
                         lfplabels{nlfp} = stimlab;
                         nlfp = nlfp + 1;
+                        if length(ft) > 1
                         result.lfpwr(ix,ie,nc) = mean(ft(gidx)) - blanklfpwr;
                         result.alfpwr(ix,ie,nc) = mean(ft(agidx)) - ablanklfpwr;
                         result.blfpwr(ix,ie,nc) = mean(ft(bgidx)) - bblanklfpwr;
@@ -1115,6 +1193,7 @@ for nc = 1:length(cvals)
                         result.blfpwrs{ix,ie,nc} = mean(fts(bgidx,:),1) - bblanklfpwr;
                         result.clfpwrs{ix,ie,nc} = mean(fts(cgidx,:),1) - cblanklfpwr;
                         result.lpfsnr = Expt.Header.LFPsnr;
+                        end
                         hold on;
                     end
                     if(laxis ~= 0)
@@ -1146,7 +1225,11 @@ for nc = 1:length(cvals)
             axes(laxis)
         end
 
-        if showplot & ~mksdf & isfield(result,'x') & ~plotsimple & ie <= size(result.x,2)
+% This test needs && so that no field x stops testing
+        if showplot && ~mksdf && isfield(result,'x') && ~plotsimple && ie <= size(result.x,2) && nc <= size(result.x,3)
+            if nc > 1 
+                xo = 1;
+            end
             result.means(find(result.n == 0)) = NaN;
             is = mod(ie-1,length(symbols))+1;
             if isempty(colorids)
@@ -1161,18 +1244,18 @@ for nc = 1:length(cvals)
                         'color',colors{ie+addn});
                     allh = [allh; ph];
                     hold on;
-                    h(ie) = allh(1);
+                    h(ie+xo) = allh(1);
                 end
             else
-                h(ie) = plot(result.x(:,ie,nc),result.means(:,ie,nc),symbols(is), ...
+                h(ie+xo) = plot(result.x(:,ie,nc),result.means(:,ie,nc),symbols(is), ...
                     'color',c);
                 result.colors{ie,nc} = c;
-                allh = h(ie);
-                result.handles(ie) = h(ie);
-                result.allhandles = [result.allhandles h(ie)];
+                allh = h(ie+xo);
+                result.handles(ie) = h(ie+xo);
+                result.allhandles = [result.allhandles h(ie+xo)];
                 if isfield(result,'bmeans')
                     hold on;
-                    bh(ie) = plot(result.x(:,ie,nc),result.bmeans(:,ie,nc),symbols(is), ...
+                    bh(ie+xo) = plot(result.x(:,ie,nc),result.bmeans(:,ie,nc),symbols(is), ...
                         'color',c);
                 end
             end
@@ -1185,7 +1268,8 @@ for nc = 1:length(cvals)
                 plot(result.x(:,ie,nc),result.f1(:,ie,nc),'o-', ...
                     'color',colors{ie+addn});
             end
-            er = errorbar(result.x(:,ie,nc),result.means(:,ie,nc),result.sd(:,ie,nc) ./ sqrt(max(result.n(:,ie,nc),1)),'o-');
+            ix = find(~isnan(result.means(:,ie,nc)));
+            er = errorbar(result.x(ix,ie,nc),result.means(ix,ie,nc),result.sd(ix,ie,nc) ./ sqrt(max(result.n(ix,ie,nc),1)),'o-');
             set(er,'color',c,'linestyle',linestyle{nc});
             result.allhandles = [result.allhandles er];
             if nolines
@@ -1196,7 +1280,7 @@ for nc = 1:length(cvals)
                 set(ber,'color',colors{ie+addn},'linestyle',linestyle{nc});
             end
 
-            if(plotlfp)
+            if(plotlfp ==1)
                 for li = 1:size(result.lfpwrs,1)
                     lstd(li) = std(result.lfpwrs{li,ie,nc}) ./ sqrt(length(result.lfpwrs{li,ie,nc}));
                     astd(li) = std(result.alfpwrs{li,ie,nc}) ./ sqrt(length(result.alfpwrs{li,ie,nc}));
@@ -1231,9 +1315,9 @@ for nc = 1:length(cvals)
 
         if isnan(bvals(ie))
             if strmatch(type,'cvsign')
-                labels{ie} = sprintf('Or%s',sprintf(' %.0f',unique([Expt.Trials.or]))); 
+                labels{ie+xo} = sprintf('Or%s',sprintf(' %.0f',unique([Expt.Trials.or]))); 
             else
-                labels{ie} = val2str(eye,'me',stimtype,Expt,0);
+                labels{ie+xo} = val2str(eye,'me',stimtype,Expt,0);
             end
         else
             if range(bvals) < 0.1
@@ -1241,7 +1325,14 @@ for nc = 1:length(cvals)
             else
                 nfp = 2;
             end
-            labels{ie} = val2str(bvals(ie),btype,stimtype,Expt,nfp);
+            if xo > 0
+                xstr = val2str(cvals(nc),ctype,stimtype,Expt,nfp);
+                labels{ie+xo} = [xstr val2str(bvals(ie),btype,stimtype,Expt,nfp)];
+            elseif isempty(allidx)
+                labels{ie+xo} = val2str(bvals(ie),btype,stimtype,Expt,nfp);
+            else
+                labels{ie+xo} = cond2str(conditions,ie,stimtype,Expt);
+            end
         end
         if showplot & result.handles(1)
             hold on;
@@ -1253,9 +1344,12 @@ for nc = 1:length(cvals)
     end
 end %end of nc in cvals loop
 
+%if Expt.Header has "Conditions" field, Stimvals.x2 no longer applies
 result.x2 = 1;
-if isfield(Expt.Stimvals,'x2') && Expt.Stimvals.x2 == 0
-    hold off;
+if isfield(Expt.Stimvals,'x2') && Expt.Stimvals.x2 == 0 && Expt.Stimvals.n2 > 0 && ~isfield(Expt.Header,'conditions')
+    if sethold == 0
+        hold off;
+    end
     result.x2 = 0;
    for nc = 1:size(result.x,3)
        nx = sum(result.n(:,:,nc),1);
@@ -1349,6 +1443,7 @@ if extra.n(ie) > 0 & ~plotsimple
       end
       fts = abs([Expt.Trials(idx).FTlfp]);
       ft = mean(abs([Expt.Trials(idx).FTlfp]),2);
+      if length(ft) > 1
       extra.lfpwr(ie) = mean(ft(gidx)) - blanklfpwr;
       extra.lfpwrs{ie} = mean(fts(gidx,:),1) - blanklfpwr;
       extra.alfpwrs{ie} = mean(fts(agidx,:),1) - ablanklfpwr;
@@ -1361,7 +1456,7 @@ if extra.n(ie) > 0 & ~plotsimple
       extra.alfpse(ie) = std(mean(fts(agidx,:),1))/sqrt(length(idx));
       extra.blfpse(ie) = std(mean(fts(bgidx,:),1))/sqrt(length(idx));
       extra.clfpse(ie) = std(mean(fts(cgidx,:),1))/sqrt(length(idx));
-
+      end
       if showplot & plotlfp == 1
           if ie ==1  %%Blank stimulus
               plot(ftfrq(fidx),ft(fidx),'color','k','linewidth',2);
@@ -1408,19 +1503,21 @@ end
 
 if isfield(result,'x') && result.x2 > 0
 %check rows have consistent X vals. Can have 0s if missing data....
+%can  also have differetn values on some rows, e.g. TwoCyl, so only
+%modify elements with n ==0
 for j = 1:size(result.x,1)
     if length(unique(result.x(j,:))) > 1
         id = find(result.n(j,:) > 0);
         xs = unique(result.x(j,id));
         if length(xs) == 1
-            result.x(j,:) = x;
+            result.x(j,:) = xs;
         end
     end
 end
 end
 
 
-if plotlfp & showplot
+if plotlfp == 1 & showplot
     subplot(2,1,2);
     if isempty(result.lfpautorange)
         title(sprintf('No Blank'));
@@ -1517,6 +1614,7 @@ if isfield(result,'acov')
     for j = 1:size(result.period,1)
         for k = 1:size(result.period,2)
             ts = [1:result.period(j,k)]+off(j,k);
+            ts = ts(ts<= size(result.acov,3));
             [a,b] = famp(ts,squeeze(result.acov(j,k,ts)),1/result.period(j,k));
             Fn(j,k,1) = real(b); 
             [a,b] = famp(ts,squeeze(result.acov(j,k,ts)),2/result.period(j,k));
@@ -1563,7 +1661,7 @@ if((isstr(legendpos) | legendpos < 6) & showplot)
     if isstr(legendpos)
         legend(h(hid),labels{hid},'Location',legendpos);
     else
-        legend(h(hid),labels{hid},legendpos);
+        legend(h(hid),labels{hid});
     end
 end
 
@@ -1598,7 +1696,7 @@ if showplot
         end
     end
 end
-result.name = Expt.Header.Name;
+[result.name, result.expname] = GetEval(Expt, 'name');
 result.extras = extra;
 
 if triglfp
@@ -1636,7 +1734,11 @@ if triglfp
     plot(cffrq(cfid),cft(cfid),'r','linewidth',2);
 end
 if showpcolor & size(result.x,2) > 1
-    [X,Y,Z] = fillpmesh(result.x, result.y, result.means);
+    [a,b] = find(result.n > nmin);
+    a = unique(a);
+    b = unique(b);
+    
+    [X,Y,Z] = fillpmesh(result.x(a,b), result.y(a,b), result.means(a,b));
     step(1) = 0.5;
     for ie = 1:length(result.extras.means)
         if splitextra(ie)
@@ -1657,7 +1759,7 @@ if showpcolor & size(result.x,2) > 1
     end
 end
 
-  if showcounts && showplot && isfield(result,'y'); 
+  if showcounts && showplot && isfield(result,'y') && size(result.x,3) >= nc 
       ystep = mean([diff(result.y(1,:)) diff(result.y(:,1))'])/2;
       for ie = 1:size(result.x,2)
       for j = 1:length(result.x(:,ie,nc))
@@ -1678,22 +1780,23 @@ end
   end
   end
 
-if ~isfield(result,'title')
-  if exist('btype','var')
-      result.title = MakeTitle(Expt,type,btype,stimtype);
-  else
-      result.title = MakeTitle(Expt,type,'00',stimtype);
-  end
-  if autonmin
-      result.title = [result.title sprintf('nmin %0f',nmin)];
+  if ~isfield(result,'title')
+      if exist('btype','var')
+          result.title = MakeTitle(Expt,type,btype,stimtype);
+      else
+          result.title = MakeTitle(Expt,type,'00',stimtype);
+      end
+      if autonmin
+          result.title = [result.title sprintf('nmin %0f',nmin)];
+      end
+      
+      
+      if showtitle & showplot
+          title(result.title)
+      end
   end
 
-  
-  if showtitle & showplot
-      title(result.title)
-end
-end
-  
+
 function val =SetLineval(bvals,xval)
 
 if xval < -999 %% special interleave
@@ -1722,13 +1825,15 @@ else
     if isfield(Expt.Header,'cellnumber')
         if isfield(Expt,'probes')
             str = strrep(str,'.mat',['.cell' num2str(Expt.Header.cellnumber) 'P' sprintf(':%d',unique([Expt.probes]))]);
+        elseif Expt.Header.cellnumber ==0
+            str = strrep(str,'.mat',[' MU P' sprintf(':%.1f',Expt.Header.probe)]);
         else
             str = strrep(str,'.mat',['.cell' num2str(Expt.Header.cellnumber) 'P' sprintf(':%.1f',Expt.Header.probe)]);
         end
     end
 end
 if ismember(stimtype,[7,17,19]) %% RDS/Sine
-    str = sprintf('%s ic = %.2f',str,GetEVal(Expt,'ic'));
+    str = sprintf('%s ic = %.2f',str,GetEval(Expt,'ic'));
 elseif stimtype == 3
     str = [str sprintf(' Or = %.2f SF = %.2f TF = %.2f',GetEval(Expt,'or'),GetEval(Expt,'sf'),GetEval(Expt,'tf'))];
 elseif stimtype == 18
@@ -1764,6 +1869,18 @@ else
 end
 Fa = angle(dfx + i * dfy) .* 180/pi;
 return
+
+
+function str = cond2str(X, n, stimtype, Expt)
+
+str = [];
+for j = 1:length(X.vars)
+    if strcmp(X.vars{j},'sM')
+        str = [str binoc.CodeName('sM',X.values(n,j)) ' '];
+    else
+        str = sprintf('%s%s=%.*f ',str, X.vars{j}, binoc.CodePrecision(X.vars{j}), X.values(n,j));
+    end
+end
 
 
 function str = val2str(val, type, stimtype,Expt,nfp)
@@ -1861,10 +1978,16 @@ function [xv, mindiff] = RemoveDuplicates(xvs, Ex)
 xv = xvs(find(xvs > -1000));
 step = mean(diff(sort(xv)));
 mindiff = step/10;
-if strmatch(Ex.Stimvals.et,{'dx' 'dy'}) %can be very small if dual increment
-mindiff = range(xv)./200;
+if isnumeric(Ex.Stimvals.et) %old
+    mindiff = range(xv)./99;
+elseif strmatch(Ex.Stimvals.et,{'dx' 'dy'}) %can be very small if dual increment
+    mindiff = range(xv)./200;
+elseif strmatch(Ex.Stimvals.et,{'TwoCylDisp'}) %can be very small if dual increment
+    mindiff = 0.001;
+elseif strmatch(Ex.Stimvals.et,{'sO'}) %can be different for different thinor, 
+    mindiff = range(xv)./200;
 else
-mindiff = range(xv)./99;
+    mindiff = range(xv)./99;
 end
 if isempty(xv)
     return;

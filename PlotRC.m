@@ -11,6 +11,10 @@ function [x,y,details] = PlotRC(RC, varargin)
 %
 % PlotRC(res,'acresp') to build SDF comparisons for Corr, AC.
 % PlotRC(res,'acresp','reftype',2) Estimates UC from UC+disps with no resp.
+%
+%  PlotRC(res, 'sdfs','labela', tag)  uses figure tagged wiht "tag" to plot
+%  PlotRC(res,'slices', t) computes new slices through the SDF data for each
+%  value of t, and plots the result 
 
 smoothw = 50;
 smoothsd = 0;
@@ -28,8 +32,10 @@ Expt = [];
 RCres = [];
 RCs = {};
 yvals = [1 2];
+lineno = 1;
 timerange = [300 1500];
 sumy = 0;
+SDF = 5;
 NETSPK = 6;
 ACLOOP = 7;
 BLANKSDF = 8;
@@ -105,6 +111,8 @@ while j  <= nargin -1
         showblank = 1;
     elseif strncmpi('acdiff',varargin{j},4)
         plottype = ACDIFF;
+    elseif strncmpi('meanresp',varargin{j},8)
+        plottype = 'meanresp';
     elseif strncmpi('acresp',varargin{j},4)
         plottype = ACRESP;
     elseif strcmpi(varargin{j},'cumsum')
@@ -139,6 +147,15 @@ while j  <= nargin -1
   elseif strncmpi('delay',varargin{j},3)
      delay = varargin{j+1};
      j = j+1;
+  elseif strncmpi('Frs',varargin{j},3)
+      j = j+1;
+      Frset = varargin{j};
+      Frs = rc.Get(RC,'Fr');
+      a = find(ismember(Frs,Frset));
+      if a > 1
+          subres = a-1;
+      end
+          
   elseif strncmpi('hold',varargin{j},3)
       holdon = 1;
   elseif strncmpi('labelb',varargin{j},6)
@@ -186,9 +203,12 @@ while j  <= nargin -1
   elseif strncmpi('sdsmooth',varargin{j},5)
      j = j+1;
      smoothsd = varargin{j};
+  elseif strncmpi('starttime',varargin{j},5)
+     j = j+1;
+     starttime = varargin{j};
   elseif strncmpi('subres',varargin{j},4)
      j = j+1;
-     if isfield(RC,'subres')
+     if isfield(RC,'subres') %only allow setting of subres if RC.subres exists
          subres = varargin{j};
      else
          subres = [];
@@ -213,7 +233,11 @@ while j  <= nargin -1
       j = j+1;
       timerange = varargin{j};
   elseif strncmpi('var',varargin{j},3)
-      calcvar = 1;
+      if strncmpi('varonly',varargin{j},6)
+          calcvar = 2;
+      else
+          calcvar = 1;
+      end
   elseif strncmpi('xid',varargin{j},3)
       j = j+1;
       xid = varargin{j};
@@ -230,6 +254,16 @@ while j  <= nargin -1
 j = j+1;
 end
 
+
+if strcmp(plottype,'default')
+    plottype = SDF;
+elseif strcmp(plottype,'novar')
+    plottype = SDF;
+    showvar = 0;
+end
+if isfield(RC,'types') && ~isfield(RC,'type')  %old file
+    RC.type = RC.types;
+end
 
 if length(RCs) > 1
     CompareRCa(RCs, plotname);
@@ -252,6 +286,7 @@ if ismember(plottype,[ACLOOP, ACRESP, ACDIFF, DXRESP, DXDIFF])
         hold off;
     end
       [x, details] = PlotACResp(RC, varargin{:});
+
       h = details.h;
       labels = details.labels;
 end
@@ -262,11 +297,19 @@ if calcvar
     for k = 1:size(RC.sdfs.extras)
         S = cat(2,S,RC.sdfs.extras{k}.sdf);
     end
-   x = var(S,[],2);
-   [details.maxvar, y] = max(x);
-   return;
+    details.var = var(S,[],2);
+   [details.maxvar, details.maxvart] = max(details.var);
+   if calcvar ==2
+       x = details.var;
+       y = details.maxvart;
+       plot(RC.times./10, details.var);
+       return;
+   end
 end
 
+if isempty(RC.sdfs) %no data
+    return;
+end
 sumrate = zeros(size(RC.sdfs.s{1}));
 sumn = 0;
 for k = 1:prod(size(RC.sdfs.s))
@@ -285,16 +328,19 @@ sumrate = sumrate/sumn;
     state.colors = colors(1+coff:end);
     state.symbols = symbols;
     state.sumrate = sumrate;
-    if strmatch(RC.types{1},{'dx' 'dO' 'dP'})
+    if strmatch(RC.type{1},{'dx' 'dO' 'dP'})
         state.showuc = 1;
     end
 
     
-
 if ismember(plottype,[0 1])
     GetFigure(labela);
+    if ~holdon
+        hold off;
+    end
     [x,y, details] = PlotSlices(RC, slices, plottype, state);
 end
+details.sumrate = sumrate;
 if plottype == 2  %plot sdf for y(1) vs y(2), for each x
     for j = 1:size(RC.sdfs.x,1)
         x(:,j) = RC.sdfs.s{j,yvals(1)}(10:end);
@@ -390,6 +436,54 @@ elseif plottype == 5 & isfield(RC.sdfs,'z') & length(zid) %second order RC
     details.ymean = WeightedSum(y,n);
     x = y(1:end-nskip+1,:);
     y = z;
+elseif strcmp(plottype, 'meanresp')
+    GetFigure(labela);
+    if holdon
+        hold on;
+    else
+        hold off;
+    end
+    tid = find(RC.times>starttime);
+    stimdur = RC.frameperiod.* RC.Fr;
+    [S, sx] = rc.sdf2mat(RC);
+    smrc = smooth(S',round(RC.Fr./2));
+    respvar = var(smrc');
+    [vmax,t] = max(respvar);
+    crit = vmax./2;
+    dt = median(diff(RC.times));
+    dur = 0;
+    while dur < stimdur./dt && crit > vmax./10
+        a = find(respvar(1:t) > crit,1);
+        b = find(respvar(t:end) < crit,1)+t-1;
+        if isempty(b)
+            b = length(respvar);
+        end
+        dur = b-a;
+        crit = crit.*0.7;
+    end
+    while dur > stimdur./dt && crit < vmax
+        a = find(respvar(1:t) > crit,1);
+        b = find(respvar(t:end) < crit,1)+t-1;
+        if isempty(b)
+            b = length(respvar);
+        end
+        dur = b-a;
+        crit = crit.*1.05;
+    end
+    means = mean(S(:,a:b),2);
+    yvals = unique(sx.y);
+    yvals = yvals(yvals > -1000);
+    lineno = 1+coff;
+    for j = 1:length(yvals)
+        id = find(sx.y == yvals(j) & sx.x > -1000);
+        [~,sid] = sort(sx.x(id));
+        id = id(sid);        
+        h(j) = plot(sx.x(id),means(id),'o-','color',colors{j},'linestyle',linestyles{lineno});
+        labels{j} = sprintf('%s=%s',RC.type{2},num2str(yvals(j)));
+        hold on;
+    end
+    x = sx.x;
+    y = means;
 elseif plottype == DIAGONAL
     [a,atime] = min(abs(RC.times - 200));
     [a,btime] = min(abs(RC.times - 1000));
@@ -480,6 +574,7 @@ elseif ismember(plottype,[5 SDFDIFF BLANKDIFF]) && (isempty(subres) || sum(subre
    [a,atime] = min(abs(RC.times - 200));
     [a,btime] = min(abs(RC.times - 1000));
     tid = find(RC.times > starttime);
+    details.tid = tid;
     details.figa = GetFigure(labela);
     if ~holdon
         hold off;
@@ -501,6 +596,7 @@ elseif ismember(plottype,[5 SDFDIFF BLANKDIFF]) && (isempty(subres) || sum(subre
     if isempty(xid)
         xid = 1:size(RC.sdfs.s,1);
     end
+    allh = [];
         for k = yid;
             for j = xid;
                 if ~isempty(RC.sdfs.s{j,k})
@@ -523,7 +619,12 @@ elseif ismember(plottype,[5 SDFDIFF BLANKDIFF]) && (isempty(subres) || sum(subre
                     elseif plottype == 5
                         h(j) = plot(RC.times(tid)./10,y(:,j,k),'color',colors{j},'linestyle',linestyles{k});
                     end
-                    labels{j} = sprintf('%.2f n=%d',RC.sdfs.x(j,1),RC.sdfs.n(j,1));
+                    if length(xid < 4)
+                        labels{j,k} = sprintf('%.2f,%.2f n=%d',RC.sdfs.x(j,1),RC.sdfs.y(j,k),RC.sdfs.n(j,k));
+                        allh(j,k) = h(j);
+                    else
+                        labels{j} = sprintf('%.2f n=%d',RC.sdfs.x(j,1),RC.sdfs.n(j,1));
+                    end
                     hold on;
                     spikediff(j,k) = mean(RC.sdfs.s{j,k}(atime:btime) - sumrate(atime:btime));
                 end
@@ -532,11 +633,16 @@ elseif ismember(plottype,[5 SDFDIFF BLANKDIFF]) && (isempty(subres) || sum(subre
             nx = j;
         end
     ny = k;
-    for j = 1:length(RC.sdfs.extras)
+    for j = 1:length(RC.sdfs.extras)        
         h(j+nx) = plot(RC.times(tid)./10,RC.sdfs.extras{j}.sdf(tid),':','color',colors{j});
         spikediff(j+nx) = mean(RC.sdfs.extras{j}.sdf(atime:btime) - sumrate(atime:btime));
+        if ~isempty(allh)
+            allh(j+nx,k) = h(j+nx);
+            labels{j+nx,k} = sprintf('%s n=%d',RC.sdfs.extras{j}.label,RC.sdfs.extras{j}.n);
+        else
         labels{j+nx} = sprintf('%s n=%d',RC.sdfs.extras{j}.label,RC.sdfs.extras{j}.n);
-        if strmatch(RC.types{1},{'dx' 'dO'}) & RC.sdfs.extraval(j) == -1005 %uncorr
+        end
+        if strmatch(RC.type{1},{'dx' 'dO'}) & RC.sdfs.extraval(j) == -1005 %uncorr
             set(h(j+nx),'color','k','linewidth',2,'linestyle','-');
             state.showuc = 1;
         end
@@ -557,9 +663,16 @@ elseif ismember(plottype,[5 SDFDIFF BLANKDIFF]) && (isempty(subres) || sum(subre
     if plottype ~= SDFDIFF
         plot(RC.times(tid)./10,sumrate(tid),'k--');
     end
+%when there are two rows of X values, may want mean of Var(x), or
+% want varx(:))  E.G. in C/AC expt, differences between C and A should
+% still count as esponse
     yvar = squeeze(var(y,[],2));
-    if smoothsd == 0
-    yvar = smooth(yvar,5,'gauss');
+    yvar = mean(yvar,2); %for 2 Y values like C, AC
+    yallvar = var(reshape(y,size(y,1),size(y,2)*size(y,3)),[],2);
+
+    if smoothsd == 0 %sdfs have not been smoothed
+        yvar = smooth(yvar,3,'gauss');
+        yallvar = smooth(yallvar,3,'gauss');
     end
     if showvar
         plot(RC.times(tid)./10,yvar .* max(y(:)./max(yvar(:))),'k','linewidth',2);
@@ -567,6 +680,9 @@ elseif ismember(plottype,[5 SDFDIFF BLANKDIFF]) && (isempty(subres) || sum(subre
         [a,b] = max(mean(yvar,2));
         plot([RC.times(tid(b))./10 RC.times(tid(b))./10],[min(y(:)) max(y(:))],':');
     end
+    details.smoothsd = 5;
+    details.varsmooth = yvar;
+    details.allvar= yallvar;
     if ~isempty(Expt)
      x = PsychKernel(Expt,'vals',RC.sdfs.x);
      x.spikediff = spikediff;
@@ -582,16 +698,19 @@ elseif ismember(plottype,[5 SDFDIFF BLANKDIFF]) && (isempty(subres) || sum(subre
      title(sprintf('CP from kernel %.3f',x.cp));
      hold off;
      y = diffspk;
+    else 
+        title(IDString(RC));
     end
     if slices(1) == 0
-        details.figb = GetFigure(labelb);
-        if ~holdon
-        hold off; %need hold on if doing this for a subres 
-        end
         [a,b] = max(mean(yvar,2));
         slices = RC.times(tid(b));
-        PlotSlices(RC, slices, 0, state);
+        details.bestslice = tid(b);
     end
+    details.figb = GetFigure(labelb);
+    if ~holdon
+        hold off; %need hold on if doing this for a subres
+    end
+    PlotSlices(RC, slices, 0, state);
 
 elseif plottype == BLANKSDF
     [a,atime] = min(abs(RC.times - 200));
@@ -702,7 +821,7 @@ elseif plottype == BLANKRATIO
         h(j+nx) = plot(RC.times(tid)./10,RC.sdfs.extras{j}.sdf(tid),':','color',colors{j});
         spikediff(j+nx) = mean(RC.sdfs.extras{j}.sdf(atime:btime) - sumrate(atime:btime));
         labels{j+nx} = sprintf('%s n=%d',RC.sdfs.extras{j}.label,RC.sdfs.extras{j}.n);
-        if strmatch(RC.types{1},{'dx' 'dO'}) & RC.sdfs.extraval(j) == -1005 %uncorr
+        if strmatch(RC.type{1},{'dx' 'dO'}) & RC.sdfs.extraval(j) == -1005 %uncorr
             set(h(j+nx),'color','k','linewidth',2,'linestyle','-');
             state.showuc = 1;
         end
@@ -754,6 +873,7 @@ elseif plottype == BLANKRATIO
         end
         [a,b] = max(mean(yvar,2));
         slices = RC.times(tid(b));
+        details.bestslice = tid(b);
         PlotSlices(RC, slices, 0, state);
     end 
 end
@@ -781,14 +901,19 @@ if ~isempty(resp)
     details.resp = resp;
 end
 
+if isnan(RC.bestdelay) %can happen when no spikes for one Exp3 conditon
+    return;
+end
 details.bestms = RC.delays(RC.bestdelay)./10;
 
-if exist('h')
-mylegend(h,labels,'Location',legendpos);
+if exist('allh')
+    mylegend(allh,labels,'Location',legendpos);
+elseif exist('h')
+    mylegend(h,labels,'Location',legendpos);
 end
 
 
-if ~isempty(subres) & ~isfield(details,'donesub') & isfield(RC,'subres');
+if sum(subres) & ~isfield(details,'donesub') & isfield(RC,'subres') && sum(subres) ;
     if isfield(details,'h') & ishandle(details.h)
         h = details.h;
     else
@@ -797,7 +922,7 @@ if ~isempty(subres) & ~isfield(details,'donesub') & isfield(RC,'subres');
     if isfield(details,'dxid')
         args = {'dxid' details.dxid details.refid 'hold'};
     else
-        args = {'hold'};
+        args = {};
     end
    k =0;
    id = find(subres > 0);
@@ -806,16 +931,25 @@ if ~isempty(subres) & ~isfield(details,'donesub') & isfield(RC,'subres');
    for j = id
        if sum(subres == 0) %aready plotted top one.
        hold on;
+       args = {args{:} 'hold'};
        end
        [a,b,c] = PlotRC(RC.subres{subres(j)},varargin{:},'coloroff',j,args{:});
        hold on;
-       if plottype == 0 & length(slices) == 1
+       if ~isfield(c,'bestms') %RC plot empty/wrong
+       elseif plottype == 0 & length(slices) == 1 
            labels{j+k} = sprintf('%.2f %.0fms n=%.0f',RC.subres{subres(j)}.(RC.ctype),c.bestms,mean(c.n(:)));
        elseif isfield(c,'n')
            labels{j+k} = sprintf('%.2f n=%.0f',RC.subres{subres(j)}.(RC.ctype),mean(c.n(:)));
+       elseif strcmp(plottype,'meanresp') %no extra legend
+           if isfield(RC.subres{subres(j)},'Fr')
+               s = sprintf('Fr=%d',RC.subres{subres(j)}.Fr);
+               gid = find(a>-1000);
+               [~,ai] = max(b(gid));
+               text(a(gid(ai)),b(gid(ai)),s);
+           end
        else
            labels{j+k} = sprintf('%.2f n=0',RC.subres{subres(j)}.(RC.ctype));
-           fprintf('No trials in %s\n',RC.name);
+           fprintf('PlotRC: No trials in %s\n',RC.name);
        end
        nsub = nsub+1;
        sdfs{nsub} = a;
@@ -832,10 +966,14 @@ if ~isempty(subres) & ~isfield(details,'donesub') & isfield(RC,'subres');
    end
    if plottype == 0 & length(slices) == 1
        labels{1} = sprintf('%s= %.2f %.0fms n=%.0f',RC.ctype,RC.(RC.ctype),details.bestms,mean(details.n(:)));
-   elseif isfield(details,'n')
+   elseif sum(subres)
+       %leave labels as they are
+   elseif ~isfield(details,'n')
        labels{1} = sprintf('%s = %.2f, n = 0',RC.ctype, RC.(RC.ctype));
-   else
+   elseif ~isempty(RC.ctype)
        labels{1} = sprintf('%s = %.2f, n = %.0f',RC.ctype, RC.(RC.ctype),mean(details.n(:)));
+   else
+       labels{1} = sprintf('n = %.0f',mean(details.n(:)));
    end
    if length(h) == length(labels);
    mylegend(h,labels);
@@ -844,8 +982,7 @@ if ~isempty(subres) & ~isfield(details,'donesub') & isfield(RC,'subres');
 end
 
    
-if plottype == 1
-   
+if plottype == 1 
     MarkIdentity(gca);
 end
 
@@ -856,7 +993,9 @@ if isfield(rc,'name')
     [a,s] = fileparts(rc.name);
     s = strrep(s,'\','/');
 end
-if isfield(rc,'probe')
+if isfield(rc.Header,'cellnumber')
+    s = sprintf('%s Cell%.0f (P%.1f)',s,rc.Header.cellnumber,rc.Header.probe);
+elseif isfield(rc,'probe')
     s = sprintf('%s P%.0f',s,rc.probe);
 end
 
@@ -1105,16 +1244,15 @@ details.snr = 0;
             bsdf = res.sdfs.extras{id}.sdf;
         end
         yrange = uc + [-2 2] .* std(endvals(:));
-        
-        pid  = find(yvals > yrange(2) & sum(res.sdfs.n,3) > res.nmin);
-        nid  = find(yvals < yrange(1) & sum(res.sdfs.n,3) > res.nmin);
-        allid = [pid; nid];
+        zscores = (yvals-uc)./std(endvals(:));
+        allid = find(abs(zscores) > 2 & sum(res.sdfs.n,3) > res.nmin);
+%        pid  = find(yvals > yrange(2) & sum(res.sdfs.n,3) > res.nmin);
+%        nid  = find(yvals < yrange(1) & sum(res.sdfs.n,3) > res.nmin);
+%        allid = [pid; nid];
         [l,m] = ind2sub(size(yvals),allid);
         if length(unique(l)) > size(yvals,1)*0.7
-            yrange = uc + [-4 4] .* std(endvals(:));
-            pid  = find(yvals > yrange(2) & sum(res.sdfs.n,3) > res.nmin);
-            nid  = find(yvals < yrange(1) & sum(res.sdfs.n,3) > res.nmin);
-            allid = [pid; nid];
+            crit = max(prctile(abs(zscores),50));
+            allid = find(abs(zscores) > crit & sum(res.sdfs.n,3) > res.nmin);
             [l,m] = ind2sub(size(yvals),allid);
         end
         if isempty(dxid)
@@ -1178,18 +1316,27 @@ details.snr = 0;
         acres.lsdf = lsdf;
         acres.msdf = msdf;
         acres.usdf = usdf;
+        if exist('bsdf')
+            acres.bsdf = bsdf;
+        end
         details.n = [na nc];
         details.dxid = [dxid; dxsigns];
         details.refid = refid;
         n = length(dxid);
         if plottype ==1
+            tid = find(res.times > 400);
             dxstr = sprintf('%.2f ',res.x(dxid,1));
             for k = 1:size(asdf,2)
             a = plot(csdf(:,k),-asdf(:,k),'color',colors{k+coff});
             h(k) = a(1);
-            [a,b] = max(lsdf(:,k));
-            id = find(lsdf(1:b,k) < a/2);
-            ht(1) = id(end);
+            [a,b] = max(lsdf(tid,k));
+            b = b+tid(1)-1;
+            id = find(lsdf(1:b,k) < a/2); %id(end) is half max on rising edged
+            if isempty(id)
+                ht(1) = tid(1);  %40ms
+            else
+                ht(1) = id(end);
+            end
             id = find(lsdf(b:end,k) < a/2);
             ht(2) = b+ht(1)-1;
             hold on;
@@ -1306,18 +1453,25 @@ for it = 1:length(slices)
                 details.n(j,k) = RC.sdfs.n(j,k);
             end
         end
+        vars(k) = var(y(:,k,it));
         if plottype == 0
             h(it) = plot(x(:,k,it),y(:,k,it),'linestyle',state.linestyles{k},'color',state.colors{it},'marker',state.symbols(k));
-            labels{it} = sprintf('%.0fms',slices(it)/10);
+            labels{it} = sprintf('%.0fms V%s',slices(it)/10,sprintf('%.1f ',vars));
             hold on;
-            plot(minmax(x(:,1,1)),[state.sumrate(b) state.sumrate(b)])
-            if isfield(state,'showuc')
-                id = find(RC.sdfs.extraval == -1005);
-                if length(id)
-                    plot(minmax(x(:,1,1)),[RC.sdfs.extras{id}.sdf(b) RC.sdfs.extras{id}.sdf(b)],'k-')
-                end
-            end
         end
+    end
+    if plottype == 0
+        hold on;
+    h(end+1) = plot(minmax(x(:,1,1)),[state.sumrate(b) state.sumrate(b)]);
+    if isfield(state,'showuc')
+        id = find(RC.sdfs.extraval == -1005);
+        if length(id)
+            h(end+1) = plot(minmax(x(:,1,1)),[RC.sdfs.extras{id}.sdf(b) RC.sdfs.extras{id}.sdf(b)],'k-');
+            labels{length(h)} = 'Uncorr';
+            details.extras.x = -1005;
+            details.extras.y = RC.sdfs.extras{id}.sdf(b);
+        end
+    end
     end
     details.h = h;
 
@@ -1326,6 +1480,9 @@ for it = 1:length(slices)
         labels{it} = sprintf('%.0fms',slices(it)/10);
         hold on;
     end
+end
+if plottype == 0
+    mylegend(h,labels);
 end
 
 

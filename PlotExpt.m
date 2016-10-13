@@ -1,4 +1,4 @@
-function result = PlotExpt(name, varargin)
+function [result, Expt] = PlotExpt(name, varargin)
 
 % result = PlotExpt(name,'varargin')
 %
@@ -28,7 +28,7 @@ function result = PlotExpt(name, varargin)
 %
 %PlotExpt(Expt,'psych') splits data into two according to psych choices,
 %and plots psf. 
-
+%
 %PlotExpt(Expt,'psych','cp') calculates choice probability, and plots rates
 %'cpt' plots mean sdf by choice, 'cph' plots spikecount histograms by
 %PlotExpt(Expt,'cpt','eyem') adds mean eye position traces to timecourse
@@ -41,7 +41,8 @@ function result = PlotExpt(name, varargin)
 %PlotExpt(Expt,'block',blockids)
 %                       Plots data only for the blocks in blockids. Look in 
 %                       Expt.Header.BlockStart for a list
-
+%...,'seqt')  Plot counts for each trial against time
+%...,'seqid')  Plot counts for each trial against id#
 
 
 
@@ -84,7 +85,14 @@ centerRFvals = 0;
 figbtag = [];
 consecpsych = [];
 CPtag = [];
-mainfig = gcf;
+
+if isfigure(name)
+    parentfig = name;
+    name = expt.GetExpt(name,'keep');
+end
+if strcmp(name,'loopback')
+    return;
+end
 
 while j  <= nvar
   str = varargin{j};
@@ -265,12 +273,17 @@ while j  <= nvar
   end
   j = j+1;
 end
+
+
+if showplot
+mainfig = gcf;
+
 if holdon
     hold on;
 elseif showplot
     hold off;
 end
-
+end
 
 result = [];
 if isempty(name)
@@ -278,8 +291,13 @@ if isempty(name)
 end
 if ischar(name)
     if ~exist(name,'file')
-        fprintf('No file %s\n',name);
+        aname = name2path(name);
+        if ~exist(aname)
+        fprintf('No file %s or \n',name,aname);
         return;
+        else
+            name = aname;
+        end
     end
 
     Expt = LoadExpt(name);
@@ -292,12 +310,18 @@ elseif iscell(name)
         hold on;
     end
     mylegend(h,labels);
+    result = res;
     return;
+elseif isfield(name,'Expt') && isfield(name,'Spikes')
+    Expt = name.Expt;
+    name = Expt.Header.Name;
 else
 Expt = name;
 name = Expt.Header.Name;
 end
-
+if ~isfield(Expt,'Trials')
+    return;
+end
 
 %if ignorename is set to zero by the input args, leave it this way.
 if ~isempty(Expt.Stimvals.et) & ~isempty(Expt.Stimvals.e2) & ischar(Expt.Stimvals.et) & ignorename
@@ -308,6 +332,9 @@ end
 
 if isfield(Expt.Trials,'excluded')
     id = find([Expt.Trials.excluded] == 0);
+    if length(id) < length(Expt.Trials)/2
+        cprintf('green','%d/%d Trials excluded in %s\n',length(Expt.Trials)-length(id),length(Expt.Trials),Expt.Header.Name);
+    end
     Expt.Trials = Expt.Trials(id);
 end
 
@@ -316,7 +343,7 @@ if length(Expt.Trials) < 1
 end
 
 norc = 0;
-if length(Expt.Trials(1).Start) > 2 
+if length(Expt.Trials(1).Start) > 2 || (isfield(Expt.Header,'rc') && Expt.Header.rc > 0)
     if condense || showseq
             Expt = CondenseRC(Expt);
             duration = prctile([Expt.Trials.End] - [Expt.Trials.Start],90);
@@ -435,6 +462,9 @@ for j = 1:length(Expt.Trials);
       Expt.Trials(j).RespDir = 0;
   end
   if getlfp & ~isfield(Expt.Trials,'FTlfp')
+      if isfield(Expt.Trials,'LFP')
+          Expt.Trials(k).FTlfp = 0;
+      else
       while LFP.Trials(k).Start < Expt.Trials(j).Start
           k = k+1;
       end
@@ -443,14 +473,14 @@ for j = 1:length(Expt.Trials);
            [Expt.Trials(j).LFP Expt.Trials(j).FTlfp] = FilterLFP(LFP.Trials(k).LFP(1:lfplen),LFP.Header.CRsamplerate,'freq',mainsf);
            k = k+1;
        end
+      end
   end
 end
 if revcor
         result = res;
         result.Data = Expt;
-        result.name = Expt.Header.Name;
     if plotpsych
-        args = {Expt.Stimvals.et,'Type2',Expt.Stimvals.e2};
+        args = {Expt.Stimvals.et};
         args = CheckExpt(Expt, args);
         GetFigure('Psych');
         hold off;
@@ -621,36 +651,53 @@ end
 
 
 if ignorename
-        if strcmp(Expt.Stimvals.e2,'Pd') & strcmp(Expt.Stimvals.et,'sM')
-            reverse = ~reverse;
-        end
-        if strcmp(Expt.Stimvals.e2,'e0') & isfield(Expt.Trials,'pi')
-            Expt.Stimvals.e2  = 'pi';
-        end
-        if strcmp(Expt.Stimvals.e2,'or') &&  strcmp(Expt.Stimvals.et,'sO') &&  strcmp(Expt.Stimvals.e3,{'ar'})
-            Expt = FillTrials(Expt,'sO');
-            args = { 'stimxy', 'Type2', 'xydir', 'Type3','or'};
-            if length(unique([Expt.Trials.or])) > 3
-                colorids = [3 1 3 1; 4 2 4 2];
-                args = [args {'colorids'} {colorids}]; 
-            end
-        elseif isempty(Expt.Stimvals.e2) | ~isempty(strmatch(Expt.Stimvals.e2,'e0')) | collapse == 2
-        args = {Expt.Stimvals.et};
-    elseif isempty(Expt.Stimvals.e2) | ~isempty(strmatch(Expt.Stimvals.e2,'e0')) | collapse == 1
-        args = {Expt.Stimvals.e2};
-    else
-        if reverse
-            args = {Expt.Stimvals.e2,'Type2',Expt.Stimvals.et};
-        else
-            args = {Expt.Stimvals.et,'Type2',Expt.Stimvals.e2};
+    Expt = expt.fix(Expt,'od');
+    et = Expt.Stimvals.et;
+    if ~isfield(Expt.Stimvals,'od')
+        Expt.Stimvals.od = 0;
+    end
+    if strcmp(Expt.Stimvals.e2,'e0') & isfield(Expt.Trials,'pi')
+        Expt.Stimvals.e2  = 'pi';
+    end
+    if strcmp(btype,'e0') && ~isempty(Expt.Stimvals.e2)
+        btype = Expt.Stimvals.e2;
+        if strcmp(et,'ce') && strcmp(btype,'e0') && isfield(Expt.Trials,'dx')
+            Expt.Stimvals.et = 'dx';
+            Expt.Stimvals.e2 = 'ce';
+            btype = 'ce';
         end
     end
+    if strcmp(btype,'Pd') & strcmp(Expt.Stimvals.et,'sM')
+        reverse = ~reverse;
+    end
+    if strcmp(btype,'or') &&  strcmp(Expt.Stimvals.et,'sO') &&  strcmp(Expt.Stimvals.e3,{'ar'})
+        Expt = FillTrials(Expt,'sO');
+        args = { 'stimxy', 'Type2', 'xydir', 'Type3','or'};
+        if length(unique([Expt.Trials.or])) > 3
+            colorids = [3 1 3 1 5 6 5 6; 4 2 4 2 7 8 7 8];
+            args = [args {'colorids'} {colorids}];
+        end
+    elseif strcmp(btype,'e0') | collapse == 2
+        args = {Expt.Stimvals.et};
+    elseif  strcmp(Expt.Stimvals.et,'e0') | collapse == 1 %E1 not set
+        args = {btype};
+    else
+        if reverse
+            args = {btype,'Type2',Expt.Stimvals.et};
+        else
+            args = {Expt.Stimvals.et,'Type2',btype};
+        end
+    end
+    
 %        fprintf('Dont know type for %s\n',name);
     if strcmp(Expt.Stimvals.et,'TwoCylDisp')
         Expt = FillTrials(Expt,'rd');
         args = {'dx', 'Type2', 'rd'};
     end
-    if strcmp(Expt.Stimvals.e3,'sM')
+    if (isfield(Expt.Trials,'od')|| Expt.Stimvals.od ~= 0) && isfield(Expt.Trials,'me') && isfield(Expt.Trials,'or') 
+        Expt= FillTrials(Expt,'or');
+    end
+    if sum(strcmp(Expt.Stimvals.e3,{'sM' 'ce' 'mixac' 'a2' 'dd'}))
         args = {args{:} 'type3' Expt.Stimvals.e3};
     end
     args = CheckExpt(Expt, args);
@@ -662,18 +709,21 @@ if isfield(Expt.Trials,'ob')
         ormean = mean([Expt.Trials.or]);
         [ors, nor] = Counts([Expt.Trials.or]);
     elseif  sum(obs < 0)
+        nor = length(Expt.Trials);
         ormean = Expt.Stimvals.or;
         Expt = FillTrials(Expt,'or');
     else
         ormean = NaN;
     end
     if ~isnan(ormean)
-        if strcmp(Expt.Stimvals.e2, 'ob')
-            if ~reverse
+        if strcmp(btype, 'ob') && strcmp(Expt.Stimvals.et,'or')
+            if ~reverse && length(nor) < 5
                 args = { 'cvsign' 'Type2' 'e0'};
                 type = 'cvsign';
                 type2 = 'e0';
             end
+        elseif strcmp(btype, 'ob') 
+            type2 = 'ob';
         else %% NOT orXob, but multiple ob = added broadband
             args = {args{:} 'extra' 'ob] > 120' 'Broad'};
         end
@@ -746,7 +796,10 @@ elseif ~isempty(consecpsych)
    end
 else
     if ~isfield(Expt.Trials,args{1})
-    Expt = FillTrials(Expt,args{1});
+        Expt = FillTrials(Expt,args{1});
+    end
+    if ~isfield(Expt.Trials,btype)
+        Expt = FillTrials(Expt,btype);
     end
     [result, Expt] = PlotRates(Expt, args{:},varargon{:});
 end
@@ -1028,6 +1081,8 @@ if getcp & length(result) > 1
             result(1).cp.sample_rate = d.sample_rate;
             result(1).cp.prefsac = d.prefsac;
             result(1).cp.nullsac = d.nullsac;
+            result(1).cp.emtimes = [d.times(1) mean(diff(d.times)) d.times(end)];
+            result(1).cp.eyes = d.eyes;
             end
         end
     result(1).fig = gcf;
@@ -1037,19 +1092,21 @@ end
 
 if ~isempty(result)
 if showseq == 2
-    PlotSequence(result,find([Expt.Trials.Trial] > 0),[],'showtimes');
+    result = PlotSequence(result,find([Expt.Trials.Trial] > 0),[],'showtimes');
 elseif showseq == 3
-    PlotSequence(result,find([Expt.Trials.Trial] > 0),[],'showid');
+    result = PlotSequence(result,find([Expt.Trials.Trial] > 0),[],'showid');
 elseif showseq
-    PlotSequence(result,find([Expt.Trials.Trial] > 0),[]);
+    result = PlotSequence(result,find([Expt.Trials.Trial] > 0),[]);
 end
 end
-result(1).fig = gcf;
+if showplot
+    result(1).fig = gcf;
+end
 
 function PlotCPHist(result,fidx, nidx, varargin)
 
 
-function PlotSequence(result,fidx, nidx, varargin)
+function result = PlotSequence(result,fidx, nidx, varargin)
 
 showhist = 0;
 showtrials = 1;
@@ -1057,6 +1114,7 @@ showtimes = 0;
 holdon = 0;
 erridx = [];
 goodidx = [];
+pl = [];
 str = ' ';
     j = 1;
     while j < nargin -2
@@ -1096,7 +1154,23 @@ for j = 1:length(Trials)
     ends(j) = Trials(j).End(end)+toff;
 end
 
-if isfield(result(1).Data.Header,'BlockStart')
+if isfield(result(1).Data.Header,'BlockStartId')
+    blocks = result(1).Data.Header.BlockStartId;
+    for j = 1:length(blocks)
+        id = find([Trials.id] > blocks(j));
+        if length(id)
+            if showtimes == 2
+                blockt(j) = Trials(id(1)).id;
+            elseif showtimes == 1
+                blockt(j) = starts(id(1))/10000;
+            else
+                blockt(j) = Trials(id(1)).Trial;
+            end
+        else
+            blockt(j) = 0;
+        end
+    end
+elseif isfield(result(1).Data.Header,'BlockStart')
     blocks = result(1).Data.Header.BlockStart;
     for j = 1:length(blocks)
         id = find([Trials.Trial] > blocks(j));
@@ -1225,6 +1299,7 @@ end
          xlabel(sprintf('Trial'));
     end
     ylabel(sprintf('Spike Count (%.2f sec)',result(1).duration./10000));
+    result.handles = pl;
     
     
     
@@ -1481,7 +1556,7 @@ if isnumeric(Expt.Stimvals.et)
 end
  if stimtype == 2 | stimtype == 15  %% RDS or RLS
      if isfield(Expt.Trials,'ce')
-     ces = [Expt.Trials.ce];
+     ces = cat(1,Expt.Trials.ce);
      if sum(ces == 0) < length(ces)/2
      args = {args{:} 'Uncorr'};
      end
@@ -1512,6 +1587,7 @@ end
   if strmatch(Expt.Stimvals.et,{'c1','c0','rf','lf'},'exact')
      args = {args{:} 'LogX'};
   end
- 
+
+
   
 

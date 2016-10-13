@@ -19,7 +19,9 @@ for j = 1:length(rx)
     map.rf(j,5) = ro(j);
     map.rf(j,6) = fitx(j);
     map.rf(j,7) = fity(j);
-    map.cellname{j} = names{j};
+    map.rf(j,9) = 0; %fix pos not in rftable
+    map.rf(j,10) = 0;
+    map.cellname{j} = regexprep(names{j},'\.[0-9]*$','');
     if regexp(names{j},'M[0-9][0-9][0-9]')
         map.types(j) = MULTICONTACT;
     else
@@ -52,6 +54,27 @@ for j = 1:length(rx)
     map.age(j) = now - map.datenum(j);
 end    
 
+cellnames = unique(map.cellname);
+skipids = [];
+for j = 1:length(cellnames)
+    id = strmatch(cellnames{j},map.cellname,'exact');
+    if length(id) > 1 && ~strcmp(cellnames{j},'Nocell')
+        skipids = [skipids id(2:end)'];
+    end
+end
+if length(skipids)
+    id = setdiff(1:length(map.cellname),skipids);
+    map.rf = map.rf(id,:);
+    map.cellname = map.cellname(id);
+    map.types = map.types(id);
+    map.pen = map.pen(id,:);
+    map.area = map.area(id);
+    map.hemisphere = map.hemisphere(id);
+    map.depth = map.depth(id);
+    map.datestr = map.datestr(id);
+    map.datenum = map.datenum(id);
+    map.age = map.age(id);
+end
 map.filename = file;
 
 if 0 

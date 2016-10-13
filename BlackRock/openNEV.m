@@ -494,7 +494,10 @@ end
 
 %% Saving the NEV structure as a MAT file for easy access
 if strcmp(SaveFile, 'save')
-    if exist(matPath, 'file') == 2
+    if strcmpi(NoMAT, 'nomat') || ~exist(matPath,'file')
+        disp('Saving MAT file. This may take a few seconds...');
+        save(matPath, 'NEV');
+    else
         disp(['File ' matPath ' already exists.']);
         overWrite = input('Would you like to overwrite (Y/N)? ', 's');
         if strcmpi(overWrite, 'y')
@@ -503,9 +506,6 @@ if strcmp(SaveFile, 'save')
         else
             disp('File was not overwritten.');
         end
-    else
-        disp('Saving MAT file. This may take a few seconds...');
-        save(matPath, 'NEV');
     end
 end
 

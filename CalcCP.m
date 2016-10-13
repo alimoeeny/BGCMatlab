@@ -15,6 +15,11 @@ while j < nargin-1
     j = j+1;
 end
 
+if nargout > 1
+    details.nancount = [sum(isnan(acounts)) sum(isnan(bcounts))];
+end
+acounts = acounts(~isnan(acounts));
+bcounts = bcounts(~isnan(bcounts));
 n = length(acounts);
 m = length(bcounts);
 if m * n == 0
@@ -45,6 +50,11 @@ steps = find(diff(zcounts(idx)) > 0);
 %reverse steps - if trapz is given positive monotonically reducing values for X and
 %Y, it returns a negative number!!
 
+getcrit = 1;
+if getcrit
+    [minx, id] = min(abs(d-(1-c)));
+    details.critperf = mean([d(id) 1-c(id)]);
+end
 rix = length(steps):-1:1;
 steps = steps(rix);
 d = [0 d(steps) 1];

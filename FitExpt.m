@@ -2,19 +2,25 @@ function fit = FitExpt(dat, varargin)
 %FitExpt(Expt....)
 %vanilla fits for RF measures
 %Expt is a result output from PlotExpt, not a standard expt structure. 
-
+%...'vonmises')   uses wrapped Gaussian for orientation tuning 
+%for OPPP expts (multiple oris and apsect ratios) returns a 2-element
+%struct. f(1).RFpos has combined estimate of X,Y of RF.
+% see also PlotExptFit
 fit = [];
 showplot = 0;
 fitargs = {};
 fitted = [];
 vonmises = 0;
 specialfit = 1;
+verbose = 0;
 j = 1;
 while j <= length(varargin)
     if strncmpi(varargin{j},'plotfit',6)
         showplot = 2;
     elseif strncmpi(varargin{j},'plot',4)
         showplot = 1;
+    elseif strncmpi(varargin{j},'verbose',4)
+        verbose = 1;
     elseif strncmpi(varargin{j},'vonmises',4)
         vonmises = 1;
     else
@@ -23,26 +29,81 @@ while j <= length(varargin)
      j = j+1;
 end
 
-if isempty(dat)
+if isempty(dat) 
     return;
 end
 
+if iscellstr(dat)
+    for j = 1:length(dat)
+        fit{j} = FitExpt(dat{j},'verbose');
+    end        
+    return;
+elseif ischar(dat)
+    filename = dat;
+    x = load(filename);
+    if verbose
+        fprintf('Loading %s\n',filename');
+    end
+    if isfield(x,'Expt');
+        dat = PlotExpt(x.Expt);
+    else
+        cprintf('red','FitExpt: No Expt in %s\n',filename);
+        return;        
+    end
+    if isempty(dat)
+        cprintf('red','FitExpt: Empty data in %s\n',filename);
+        return;
+    end
+end
+
+if ~isfield(dat,'x') %not a plot result
+    if isexpt(dat)
+        Expt = dat;
+        dat = PlotExpt(Expt,'noplot');
+    else
+        cprintf('red','FitExpt: No X in %s',dat.name);
+        cellid = GetCellNumber(dat);
+        if cellid > 0
+            cprintf('red',' Cell %d',cellid);
+        end
+        fprintf('\n');
+        return;
+    end
+end
     if ~isfield(dat,'handles')
         dat.handles = [];
     end
 
-if isfield(dat,'types') && isfield(dat,'bestdelay') %its an RC expt
-    if strmatch(dat.types{1},{'Op' 'Pp'})
+if isfield(dat,'type') 
+    for j = 1:length(dat.type)
+        if isempty(dat.type{j})
+            dat.type{j} = 'e0';
+        end
+    end
+end
+
+if isfield(dat,'Data')
+T = dat.Data.Trials;
+else 
+    T = [];
+end
+
+if isfield(dat,'bestdelay') %its an RC expt
+    if isnan(dat.bestdelay)
+        return;
+    elseif strmatch(dat.type{1},{'Op' 'Pp'})
         x = dat.x(:,1);
         y = sum(dat.y(:,1,dat.bestdelay),2);
-        if strmatch(dat.types{2},'ph')
-        black = dat.y(:,1,dat.bestdelay);
-        white = dat.y(:,2,dat.bestdelay);
-        bnp = dat.sdfs.n(:,1);
-        wnp = dat.sdfs.n(:,2);
+        if strmatch(dat.type{2},'ph')
+            black = dat.y(:,1,dat.bestdelay);
+            white = dat.y(:,2,dat.bestdelay);
+            bnp = dat.sdfs.n(:,1);
+            wnp = dat.sdfs.n(:,2);
         else
         black = [];
-        white = []
+        white = [];
+        bnp = [];
+        wnp = [];
         end
         id = find(dat.sdfs.extraval == -1009);
         np = sum(dat.sdfs.n,2);
@@ -59,7 +120,8 @@ if isfield(dat,'types') && isfield(dat,'bestdelay') %its an RC expt
            wnp = [wnp; dat.sdfs.extras{id}.n];
         end
         fit = FitGauss(x,y,'nreps',np,'freebase', fitargs{:});
-        fit.x = x;
+        fit.resp = y;
+        fit.x = x; %anybody need this too?  Tuning curve fits use x...
         fit.rcvar = (max(dat.vars)-bv)/sv;
         if length(black) > 1
             fit.bfit = FitGauss(x,black,'nreps',bnp,'freebase', fitargs{:});
@@ -74,17 +136,49 @@ if isfield(dat,'types') && isfield(dat,'bestdelay') %its an RC expt
             fit.wtfit = FitGauss(dat.times,wvar','freebase', fitargs{:});
             fit.toverlap = (fit.btfit.mean-fit.wtfit.mean)./sqrt(mean([fit.btfit.sd^2 fit.wtfit.sd^2]));
         end
-        id = find(~isnan(fit.x));
-        xv = linspace(min(fit.x(id)),max(fit.x(id)));
-        fitted = FitGauss(xv,fit.params,fitargs{:},'eval');
-        
+        id = find(~isnan(fit.x) & ~isinf(fit.x));
+        fit.xv = linspace(min(fit.x(id)),max(fit.x(id)));
+        fit.fitcurve = FitGauss(fit.xv,fit.params,fitargs{:},'eval');
+        f = dat.type{1};
+        fit = CopyFields(fit, dat.Data.Stimvals,{'rOp' 'rPp' 'Op' 'Pp'});
+        if isfield(T,'xo') || isfield(T,'yo')
+            xo = [];
+            yo = [];
+            for j = 1:length(T)
+                if isfield(T,'xo')
+                    xo(j) = T(j).xo;
+                end
+                if isfield(T,'yo')
+                    yo(j) = T(j).yo;
+                end
+                op(j) = T(j).(f)(end);
+            end
+            id = find(op > -1000);
+            fit.(['stim' f]) = mean(op(id));
+            if isempty(xo)
+                fit.opdir(1) = 0;
+                fit.xo = dat.Data.Stimvals.xo;
+            else
+                fit.xo = mean(xo(id));
+            xf = polyfit(op(id),xo(id),1);
+            fit.opdir(1) = xf(1);
+            end
+            if isempty(yo)
+                fit.opdir(2) = 0;
+                fit.yo = dat.Data.Stimvals.yo;
+            else
+                fit.yo = mean(yo(id));
+            xf = polyfit(op(id),yo(id),1);
+            fit.opdir(2) = xf(1);
+            end
+        end
             
-    elseif strmatch(dat.types{1},{'or'})
+    elseif strmatch(dat.type{1},{'or'})
         x = dat.x(:,1);
         y = sum(dat.y(:,:,dat.bestdelay),2);
         np = sum(dat.sdfs.n,2);
         period = 180;
-        bl = find(dat.sdfs.extraval == -1009)
+        bl = find(dat.sdfs.extraval == -1009);
         if bl && dat.sdfs.extras{bl}.n > 0
             x = [x; Inf];
             y = [y; dat.sdfs.extras{bl}.sdf(dat.delaysamples(dat.bestdelay))];
@@ -102,12 +196,55 @@ if isfield(dat,'types') && isfield(dat,'bestdelay') %its an RC expt
                 fitargs = {fitargs{:} 'freebase'};
                 fit = FitGauss(x,y,'nreps',np,fitargs{:},'period',period);
                 fit.x = x;
-                id = find(~isnan(fit.x));
+                id = find(~isnan(fit.x) & ~isinf(fit.x));
                 fit.xv = linspace(min(fit.x(id)),max(fit.x(id)));
                 fit.fitcurve = FitGauss(fit.xv,fit.params,fitargs{:},'period',period,'eval');
             end
+            fit.resp = y;
+            fit.nspks = dat.nspks;
             fit.peak = PeakFit(fit);
+            fit.respvar = rc.RespVar(dat);
+    elseif sum(strcmp(dat.type{1},{'dx'}))
+        if strcmp(dat.type{2},'ce') && size(dat.y,2) > 1
+            bt = dat.bestdelay;
+            x = dat.x(:,bt,1);
+            y = dat.y(:,2,bt);
+            z = dat.y(:,1,bt);
+            n = dat.sdfs.n;
+            id = find(~isnan(y) & ~isnan(z));
+            x = x(id);
+            y = y(id);
+            z = z(id);
+            n = n(id,:);
+            [fit.params, fit.res, details] = FitACGabors(x,y,z);
+            fit = AddError(fit, details); %copy errors
+            xv = min(x):diff(minmax(x))./100:max(x);
+            a = FitACGabors(xv, fit.params, 'eval');
+            fit.fitted = a;
+            fit.xfit = xv;
+            fit.resp = cat(2,y(:),z(:));
+            fit.x = x;
+            %fit.y = unique(dat.y);
+            fit.n = n;
+            fit.fittype = 'ACGabors';
+            fit.fitamp = diff(minmax(a(:,2)))./diff(minmax(a(:,1)));
+            [a,b] = fit_bothsubj2error(a(:,1),a(:,2));
+            fit.fitslope = [b a]; %Our Slope estimate based on the fits.
+            [a,b] = fit_bothsubj2error(y,z);
+            fit.slope = [b a];
+            if isfield(dat,'extras')
+                fit.extras = rmfields(dat.extras,{'spktimes' 'counts'});
+            end
+            fit.type = dat.type;
+            fit.y = [-1 1];
+            fit.state.sdfy = unique(dat.sdfs.y);
+
+        end
+    elseif sum(strcmp(dat.type{1},{'dp'})) %rls.ACRC1d
     end
+    fit.rcdur = dat.stimdur;
+    [~, fit.RespVar] = rc.RespVar(dat);
+
 elseif strmatch(dat.type{1},{'Op' 'Pp'}) %not RC expt
     x = reshape(dat.x,1,prod(size(dat.x)));
     y = reshape(dat.means,1,prod(size(dat.means)));
@@ -121,6 +258,7 @@ elseif strmatch(dat.type{1},{'Op' 'Pp'}) %not RC expt
     end
     fit = FitGauss(x,y,'nreps',np,fitargs{:});
     fit.x = x;
+    fit.resp = y;
     fit.ve = 1 - fit.rss./(var(y) .* length(y)-1);
     theta = pi/2 - (GetEval(dat.Data,'Ro') * pi/180);
     y = GetEval(dat.Data,'Pp');
@@ -130,6 +268,21 @@ elseif strmatch(dat.type{1},{'Op' 'Pp'}) %not RC expt
     fit.xv = linspace(min(fit.x(id)),max(fit.x(id)));
     fit.fitcurve = FitGauss(fit.xv,fit.params,fitargs{:},'eval');
     fit.peak = PeakFit(fit);
+    f = dat.type{1};
+    id = find([dat.Data.Trials.(f)] > -1000);
+    if isfield(dat.Data.Trials,'xo')
+        xf = polyfit([dat.Data.Trials(id).(f)],[dat.Data.Trials(id).xo],1);
+        fit.opdir(1) = xf(1);
+    end
+    if isfield(dat.Data.Trials,'yo')
+        yo = [dat.Data.Trials(id).yo];
+        if length(yo) == length(id)
+            xf = polyfit([dat.Data.Trials(id).(f)],yo,1);
+            fit.opdir(2) = xf(1);
+        end
+    end
+    fit.di = expt.DInd(dat);
+        
 
 elseif strmatch(dat.type{1},{'stimxy'}) %not RC expt
     amps = squeeze(var(dat.means));
@@ -160,10 +313,12 @@ elseif strmatch(dat.type{1},{'stimxy'}) %not RC expt
         znp = [znp dat.extras.n(bl)];
         fitargs = {fitargs{:} 'freebase'};
     end
-    fit = FitGauss(x,y,'nreps',np,fitargs{:});
+    fit = FitGauss(x,y,'nreps',np,fitargs{:});   
     fit(2) = FitGauss(z,zy,'nreps',znp,fitargs{:});
     fit(1).x = x;
     fit(2).x = z;
+    fit(1).resp = y;
+    fit(2).resp = zy;
     id = find(~isnan(fit(1).x) & ~isinf(fit(1).x));
     fit(1).xv = linspace(min(fit(1).x(id)),max(fit(1).x(id)));
     fit(1).fitcurve = FitGauss(fit(1).xv,fit(1).params,fitargs{:},'eval');
@@ -196,14 +351,18 @@ elseif strmatch(dat.type{1},{'stimxy'}) %not RC expt
         fit(1).RFpos(2) = fit(2).mean;
     end
     fit(1).fitstr = sprintf('RF %.2f,%.2f',fit(1).RFpos(1),fit(1).RFpos(2));
-        
+    [~, di] = expt.DInd(dat);
+    for j = 1:length(fit)
+        fit(j).di.di = di.alldi(j);
+    end
+
     
-elseif strmatch(dat.type{1},{'or'}) & length(dat.type) > 1 & strmatch(dat.type{2},'me')  %%nned period 360 or 180 
+elseif strmatch(dat.type{1},{'or'}) & length(dat.type) > 1 & strmatch(dat.type{2},{'me' 'ob'})  %%nned period 360 or 180 
+%Nor RC
     x = dat.x;
     y = dat.means;
     np = dat.n;
     fitargs = {fitargs{:} 'posbase'};
-    
     for j = 1:size(dat.x,2)
         specialfit = 0;
         x = dat.x(:,j);
@@ -215,7 +374,7 @@ elseif strmatch(dat.type{1},{'or'}) & length(dat.type) > 1 & strmatch(dat.type{2
         if range(x) > 270
             r(1) = MeanVector(y,x);
             r(2) = MeanVector(y,x,'double');
-            if abs(r(2)) > abs(r(1))
+            if abs(r(2)) > abs(r(1)) %not directional but wide ragne
                 period = 180;
                 specialfit = 1;
             else
@@ -229,29 +388,42 @@ elseif strmatch(dat.type{1},{'or'}) & length(dat.type) > 1 & strmatch(dat.type{2
             x = [x; Inf];
             y = [y; dat.extras.means(bl)];
             np = [np; dat.extras.n(bl)];
-            fitargs = {fitargs{:} 'freebase'};
+            fitargs = {fitargs{:} 'posbase'};
         end
         id = find(~isnan(y));
         if specialfit
             fit = FitOriTuning(x(id),y(id),'nreps',np(id),fitargs{:});
+            fit.type = 'FitOriTuning';
         elseif vonmises
             fit = FitGauss(x(id),y(id),'nreps',np(id),fitargs{:},'periodwrap',period);
+            fit.type = 'FitGaussOr';
         else
             fit = FitGauss(x(id),y(id),'nreps',np(id),fitargs{:},'period',period);
+            fit.type = 'FitGaussOr';
         end
         fit.x = x;
+        fit.resp = y;
         id = find(~isnan(fit.x) & ~isinf(fit.x));
         fit.xv = linspace(min(fit.x(id)),max(fit.x(id)));
         if specialfit
             fit.fitcurve = FitOriTuning(fit.xv,fit.params,fitargs{:},'eval');
         else
-            fit.fitcurve = FitGauss(fit.xv,fit.params,fitargs{:},'periodwrap',period,'eval');
+            fit.fitcurve = FitGauss(fit.xv,fit.params,fitargs{:},fit,'eval');
         end
         fit.respvar = std(y);
         fit.peak = PeakFit(fit);
         fits(j) = fit;
     end
     fit = fits;
+
+    [~, di] = expt.DInd(dat);
+    for j = 1:length(fit)
+        fit(j).di.di = di.alldi(j);
+        fit(j).di.var = di.var(j,:);
+        fit(j).di.anovan = di.anovap;
+        fit(j).di.anovap = di.allp(j);
+    end
+
 elseif strmatch(dat.type{1},{'or'})  %%nned period 360 or 180 
     x = reshape(dat.x,1,prod(size(dat.x)));
     y = reshape(dat.means,1,prod(size(dat.means)));
@@ -261,6 +433,9 @@ elseif strmatch(dat.type{1},{'or'})  %%nned period 360 or 180
         period = 360;
     else
         period = 180;
+    end
+    if length(x) < 3
+        return;
     end
     bl = strmatch('Blank',dat.extras.label);
     if bl && dat.extras.n(bl) > 0
@@ -285,21 +460,170 @@ elseif strmatch(dat.type{1},{'or'})  %%nned period 360 or 180
         fit.fitcurve = FitGauss(fit.xv,fit.params,fitargs{:},'period',period,'eval');
     end
         fit.peak = PeakFit(fit);
-   
-elseif strmatch(dat.type{1},{'dx'})
-    for j = 1:length(dat.x)
-        x(j) = dat.x(j);
-        y{j} = dat.counts{j};
+        fit.resp = y;
+        [~, fit.di] = expt.DInd(dat);
+
+elseif strmatch(dat.type{1},{'sf'})
+    clear fit;
+    fitargs = {fitargs{:} 'posbase'};
+    for j = 1:size(dat.y,2)
+        x = dat.x(:,j);
+        y = dat.means(:,j);
+        np = dat.n(:,j);
+        F = FitGauss(x,y,'nreps',np,fitargs{:});
+        F.x = x;
+        F.resp = y;
+        F.xv = linspace(min(F.x),max(F.x));
+        F.fitcurve = FitGauss(F.xv,F.params,fitargs{:},'eval');
+        F.state.sds = dat.sd(:,j);
+        if strcmp(dat.type{2},'me')
+            F.me = mean(dat.y(:,j));
+        end
+        F.xo = GetEval(dat.Data,'xo');
+        F.yo = GetEval(dat.Data,'yo');
+        fit(j) = F;    
     end
-    FitGabor(x,y);
+elseif strcmp(dat.type{1},'dx') && strcmp(dat.type{2},'dy') 
+    fit.ddi = CalcDDI(dat.Data);
+    fit.di = fit.ddi;
+elseif sum(strcmp(dat.type{1},{'dx' 'dO'}))
+    if strcmp(dat.type{2},'ce')
+        [a,aci] = find(dat.y < -0.9);
+        if isempty(aci)
+            [a,aci] = find(dat.y < 0.9 .* min(dat.y(:)));
+        end
+        [a,cci] = find(dat.y > 0.9);
+        if isempty(cci)
+            [a,cci] = find(dat.y > 0.9 .* max(dat.y(:)));
+        end
+            
+        fit.resp = dat.y;
+        if isempty(aci)
+            fit = AddError(fit,'-show','No AC data in %s\n',dat.name);
+            return;
+        elseif isempty(aci)
+            fit = AddError(fit,'-show','No Corr data in %s\n',dat.name);
+            return;
+        end
+        
+        for j = 1:size(dat.x,1)            
+            x(j) = dat.x(j,1);
+            if length(cci) >= j
+                n(j,1) = dat.n(j,cci(j));
+                fit.y(j,1) = dat.y(j,cci(j));
+            else
+                fit.y(j,1) = NaN;
+                n(j,1) = 0;
+            end
+            if length(aci) >= j
+                n(j,2) = dat.n(j,aci(j));
+                fit.y(j,2) = dat.y(j,aci(j));
+            else
+                n(j,2) = 0;
+                fit.y(j,2) = NaN;
+            end
+            if sum(n(j,:)>0) > 1 %data for both
+                y(j) = mean(dat.counts{j,cci(j)});
+                z(j) = mean(dat.counts{j,aci(j)});
+                sem(j,1) = dat.sd(j,cci(j))./sqrt(dat.n(j,cci(j)));
+                sem(j,2) = dat.sd(j,aci(j))./sqrt(dat.n(j,aci(j)));
+                good(j) = 1;
+            else
+                y(j) = NaN;
+                z(j) = NaN;
+                good(j) = 0;
+            end
+        end
+        if max(n(:)) >4 && min(n(:)) < 2
+            good = find(sum(n > 1)) > 1
+        else
+            good = find(good>0);
+        end
+        x = x(good);
+        y = y(good);
+        z = z(good);
+        n = n(good,:);
+        sem = sem(good,:);
+        fit.resp = y;
+        fit.type = dat(1).type;
+        if isfield(dat.Data.Header,'loadname')
+            fit.loadname = dat.Data.Header.loadname;
+        end
+        if isfield(dat.Data.Header,'name')
+            fit.name = dat.Data.Header.name;
+        end
+        if isfield(dat.Data.Header,'Name')
+            fit.name = dat.Data.Header.Name;
+        end
+        if std(y) == 0 && std(z) == 0
+            fit = AddError(fit,'-show','No response vairiance in %s\n',dat.name);
+        else
+            [fit.params, fit.res, details] = FitACGabors(x,y,z,n);
+            fit = AddError(fit, details); %copy errors
+            xv = min(x):diff(minmax(x))./100:max(x);
+            a = FitACGabors(xv, fit.params, 'eval');
+            fit.fitted = a;
+            fit.xfit = xv;
+            fit.resp = cat(2,y(:),z(:));
+            fit.x = x;
+            %fit.y = unique(dat.y);
+            fit.n = n;
+            fit.sem =sem;
+            fit.fittype = 'ACGabors';
+            fit.fitamp = diff(minmax(a(:,2)))./diff(minmax(a(:,1)));
+            [a,b] = fit_bothsubj2error(a(:,1),a(:,2));
+            fit.fitslope = [b a]; %Our Slope estimate based on the fits.
+            [a,b] = fit_bothsubj2error(y,z);
+            fit.slope = [b a];
+            if isfield(dat,'extras')
+                fit.extras = rmfields(dat.extras,{'spktimes' 'counts'});
+            end
+        end
+    else
+        for j = 1:length(dat.x)
+            x(j) = dat.x(j);
+            y{j} = dat.counts{j};
+        end
+        fit = FitGabor(x,y);
+        fit.resp = y;
+    end
+    fit.ddi = CalcDDI(dat.Data);
+    fit.di = fit.ddi;
 else
     fit = [];
 end
 
 if ~isempty(fit)
+if ~isfield(fit,'xv')
+    j = 1;
+end
+if isfield(dat,'Data') %Have orginal Expt stuff
+    if isfield(dat.Data.Stimvals,'ve')
+        [fit.ve] = deal(dat.Data.Stimvals.ve);
+    end
+    
+    if isfield(dat.Data.Trials,'xo')
+        xos = cat(1,dat.Data.Trials.xo);
+        xo = mean(xos(xos > -1000));
+        [fit.xo] = deal(xo);
+    end
+    if isfield(dat.Data.Trials,'yo')
+        xos = cat(1,dat.Data.Trials.yo);
+        yo = mean(xos(xos > -1000));
+        [fit.yo] = deal(yo);
+    end
+end
 if showplot == 1  
         id = find(~isnan(x) & ~isinf(x));
-        plot(fit.x(id),fit.fitted(id));
+        if isfield(fit,'xfit')
+            for j = 1:size(fit.fitted,2)
+                plot(fit.xfit,fit.fitted(:,j));
+            end
+        elseif isfield(fit,'fitted')
+            for j = 1:size(fit.fitted,2)
+                plot(fit.x(id),fit.fitted(id,k));
+            end
+        end
     elseif showplot == 2
         if isempty(fitted)
             for j = 1:length(fit)

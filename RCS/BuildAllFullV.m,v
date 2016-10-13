@@ -1,9 +1,14 @@
-head	1.2;
+head	1.3;
 access;
 symbols;
 locks; strict;
 comment	@// @;
 
+
+1.3
+date	2012.11.30.16.27.00;	author bgc;	state Exp;
+branches;
+next	1.2;
 
 1.2
 date	2012.02.06.20.23.01;	author bgc;	state Exp;
@@ -23,9 +28,9 @@ For each Expt in a directory.
 @
 
 
-1.2
+1.3
 log
-@Checks for errors building FullV
+@records build version now. This is 1.0
 @
 text
 @function res = BuildAllFullV(name, varargin)
@@ -38,9 +43,16 @@ text
 % keeps going if new files exist.
 % BuidlAllFullV(dir, 'byname') Finds existing FullV files by name, and uses
 % only these
-% BuidlAllFullV(dir, 'expts', exlist)
+% BuidlAllFullV(dir, 'expts', exlist)   %just does listed expts.
 %
-%To build a FullV file it must first build an index of what time samples
+%BuildAllFullV(..., 'recalc')
+%
+%BuildAllFullV(..., 'remakeV')    forces rebuilding of FullV file
+%
+%BuildAllFullV(..., 'expts', explist, 'remakeV','recalc')    forces rebuilding of FullV file,
+%and re-indexing of spkblk files, for just the named experiments
+%
+%to build a FullV file it must first build an index of what time samples
 %are available for what probes in all the .mat file made by spike2.
 %jan 2012  Changed so that default saved format uses int16 rather than
 %double
@@ -56,6 +68,8 @@ sizecheck = (memsize * 1e6) .* 0.8;
 X.spkrate = 50;
 template = [];
 args = {'ndives' 0}; %don't allow chasing of trigger by default
+version = 1.0;
+
 
 if isdir(name)
 %    idxfile = [name / 'probes.mat'];
@@ -79,6 +93,8 @@ while j <= length(varargin)
         end
     elseif strncmpi(varargin{j},'byname',3)
         byname = 1;
+    elseif strncmpi(varargin{j},'bysuffix',3)
+        byname = 1;
     elseif strncmpi(varargin{j},'checkv',6)
         X.checkv = 1;
     elseif strncmpi(varargin{j},'expts',3)
@@ -96,6 +112,8 @@ while j <= length(varargin)
     elseif strncmpi(varargin{j},'recalc',3)
         if recalc == 4
             recalc = 5;
+        elseif byname %just redo auto cuts
+            recalc = 1;
         else
             recalc = 2;
         end
@@ -135,7 +153,7 @@ else
             return;
         end
         load(idxfile);
-        if exists('Expt','var') && isfield(Expt,'DataType') && strmatch('GridData',Expt.DataType)
+        if exist('Expt','var') && isfield(Expt,'DataType') && strmatch('GridData',Expt.DataType)
             ProcessGridFullV(name);
         end
     end
@@ -218,8 +236,9 @@ else
         probes = MakeProbeIndex(path,'recalc');
     elseif length(expts) && recalc == 4 %take probe ids from exist
         probes = MakeProbeIndex(path,'suffix',expts);
-    elseif length(expts) && recalc == 5  %reread idx files
+    elseif length(expts) && recalc == 5  %reread spkblk
         probes = MakeProbeIndex(path,'suffixrecalc',expts);
+        res.probes = probes;
     else
     probes = MakeProbeIndex(path);
     end
@@ -286,7 +305,9 @@ if runautocut == 2  %do all teh cutting after building all the files
     end
 end
 res.end = now;
+if logfid > 0
 fclose(logfid);
+end
 
 function [res, details] = ProcessSuffix(path, probes, ex, lastblk, X, args)
 
@@ -296,6 +317,8 @@ nocut = 0;
 mkint = 1;
 readint = 0;
 res = {};
+exptargs = {};
+
 j = 1;
 checkexpts = 0;
 while j <= length(args)
@@ -310,6 +333,8 @@ while j <= length(args)
         mkint = 1;
     elseif strncmpi(args{j},'nocut',5)
         nocut = 1;
+    elseif strncmpi(args{j},'noframes',5)
+        exptargs = {exptargs{:} args{j}};
     elseif strncmpi(args{j},'readint',5)
         readint = 1;
     elseif strncmpi(args{j},'template',6)
@@ -339,6 +364,7 @@ if exist(outname,'file') && X.recalc < 2
     if isfield(FullV, 'intscale')
         FullV.V = double(FullV.V) .* FullV.intscale(1)/FullV.intscale(2);
     end
+    FullV.loadname = outname;
     res.loadtime = mytoc(ts);
 %    FullV.name = outname;
     if X.logfid
@@ -396,7 +422,8 @@ end
 if ismember(X.recalc, [4 5]) %just make FullV
     return;
 end
-Expt = LoadExpt(path, ex, X.recalc > 1, X.logfid);
+Expt = LoadExpt(path, ex, X.recalc > 1, X.logfid, exptargs);
+if isfield(Expt,'Trials')
 ts = Expt.Trials(1).Start./10000;
 te = Expt.Trials(end).End./10000;
 if FullV.t(1) > ts || FullV.t(end) < te
@@ -406,6 +433,10 @@ if FullV.t(1) > ts || FullV.t(end) < te
     end
 end
 fprintf('Ex %d: %d Ch x %d samples %.1f (%.1f)- %.1f(%.1f)\n',ex,size(FullV.V,1), size(FullV.V,2),FullV.t(1),ts,FullV.t(end),te);
+else
+    fprintf('Expt %d has no trials\n',ex);
+    return;
+end
 if nocut
     
     return;
@@ -442,6 +473,7 @@ end
    
 function FullV = BuildFullVFile(path, probes, ex, lastblk, outname)
 
+version = 1.0;
 probelist = unique([probes.probe]);
 ts = now;
 id = find([probes.suffix] == ex);
@@ -452,6 +484,8 @@ end
 FullV.exptno = ex;
 FullV.buildtime = mytoc(ts);
 FullV.builddate = now;
+FullV.buildversion = version;
+
 if isfield(FullV,'error') && FullV.error > 0
     return;
 end
@@ -496,15 +530,22 @@ else
     rebuild = 0;
 end
 
-function Ex = LoadExpt(name, ei, rebuild, logfid)
+function Ex = LoadExpt(name, ei, rebuild, logfid, varargin)
         Ex = [];
-        smrname = regexprep(name,'lem/M([0-9]*)','$0/lemM$1');
-        smrname = regexprep(smrname,'online/lemM([0-9]*)','$0/lemM$1');
+        if regexp(name,'lem/M[0-9]*')
+            smrname = regexprep(name,'lem/M([0-9]*)','$0/lemM$1');
+            smrname = regexprep(smrname,'online/lemM([0-9]*)','$0/lemM$1');
+            smrname = regexprep(smrname,'/$','');
+        elseif regexp(name,'dae/M[0-9]*')
+            smrname = regexprep(name,'dae/M([0-9]*)','$0/daeM$1');
+            smrname = regexprep(smrname,'online/daeM([0-9]*)','$0/daeM$1');
+            smrname = regexprep(smrname,'/$','');
+        end
         exfile = [smrname '.' num2str(ei) 'idx.mat'];
         matfile = [smrname '.' num2str(ei) '.mat'];
         if exist(matfile) && (~exist(exfile,'file') || rebuild)
             PrintMsg(logfid,'Building %s\n',exfile);
-            APlaySpkFile(matfile,'bysuffix','noerrs');
+            APlaySpkFile(matfile,'bysuffix','noerrs', varargin{:});
         end
         if exist(exfile,'file')
             fprintf('Loading %s\n',exfile);
@@ -525,6 +566,51 @@ function Ex = LoadExpt(name, ei, rebuild, logfid)
             Ex.Header.name = exfile;
             Ex.Stimvals.ed = mean(Expt.Trials.ed(id));
         end@
+
+
+1.2
+log
+@Checks for errors building FullV
+@
+text
+@d11 1
+a11 1
+% BuidlAllFullV(dir, 'expts', exlist)
+d13 8
+a20 1
+%To build a FullV file it must first build an index of what time samples
+d36 2
+d61 2
+d80 2
+d121 1
+a121 1
+        if exists('Expt','var') && isfield(Expt,'DataType') && strmatch('GridData',Expt.DataType)
+d204 1
+a204 1
+    elseif length(expts) && recalc == 5  %reread idx files
+d206 1
+d273 1
+d275 1
+d285 2
+d301 2
+d332 1
+d390 2
+a391 1
+Expt = LoadExpt(path, ex, X.recalc > 1, X.logfid);
+d401 4
+d441 1
+d452 2
+d498 1
+a498 1
+function Ex = LoadExpt(name, ei, rebuild, logfid)
+d500 9
+a508 2
+        smrname = regexprep(name,'lem/M([0-9]*)','$0/lemM$1');
+        smrname = regexprep(smrname,'online/lemM([0-9]*)','$0/lemM$1');
+d513 1
+a513 1
+            APlaySpkFile(matfile,'bysuffix','noerrs');
+@
 
 
 1.1

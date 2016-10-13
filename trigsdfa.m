@@ -40,6 +40,10 @@ function [sdf, nsac, nspikes, spikes, times, details] = trigsdf(Trials, width, .
 % build up a PSTH with 0.1ms bins. Making the bins shorter might
 % make this ultrafast.
 
+
+                    if 0
+                    end
+
 skipevent = 0;
 nskip = 0;
 period = 0;
@@ -49,12 +53,15 @@ nvar = nargin - 3;
 j = 1;
 lfpmin = [];
 timebinned = 1;
+getallspks = 0;
 
 while j  <= nvar
   str = varargin{j};
   if strmatch('kernel',str)
     j = j+1;
     kl = varargin{j};
+  elseif strncmpi('allspks',str,5)
+      getallspks = 1;
   elseif strncmpi('events',str,3)
       for k = 1:length(Trials)
           Trials(k).Trigger = Trials(k).Events{:,2};
@@ -63,6 +70,10 @@ while j  <= nvar
       clipping = 1;
   elseif strncmpi('freetimes',str,7)
       timebinned = 0;
+  elseif strncmp('bmethod',str,4)
+      [sdf, nsac, nspikes, spikes, times, details] = trigsdfc(Trials, width, ...
+          times, varargin{:});
+      return;
   elseif strmatch('lfpmin',str)
     j = j+1;
     lfpmin = varargin{j};
@@ -99,14 +110,29 @@ if length(Trials) == 0
     return;
 end
 
+if IsAllExpt(Trials)
+    details.times = times;
+    for j = 1:length(Trials.Header)
+        Expt = All2Expt(Trials,Trials.Header(j).cellnumber);
+        [sdf(:,j), b,c,d,e,f] = trigsdfa(Expt.Trials,width, times, varargin{:});
+        details.nsac = b;
+        details.nspikes(j) = c;
+        details = CopyFields(details,f);
+    end
+    nsac = details;
+    return;
+end
+
+
+ntimepts = length(times);
 times = [times(1)-width times];
-nbins = 1+times(end) - times(1);
+nbins = round(1+times(end) - times(1));
 if period
     spikes = zeros(period*2,1);
 else
     spikes = zeros(nbins,1);
 end
-
+spikebins = times(1) +[0:length(spikes)-1];
 if(~isfield(Trials,'Trigger'))
   [Trials.Trigger] = deal(0);
 end
@@ -150,7 +176,7 @@ if isempty(lfpmin)
 %used to use fix(sxs-txs), but now 1bin = 1 clock tick, no need.
 %timbinned can be zero if using free array of times
         if timebinned
-            spk = sxs - txs;
+            spk = round(sxs - txs);
         else
             spk = fix(sxs - txs);
         end
@@ -177,6 +203,9 @@ if isempty(lfpmin)
 
 % The for loop is faster than spikes(spk(idx)) = spikes(spk(idx))+1
 % And
+       if getallspks
+           allspks{j} = spk;
+       end
 %        allspks = [allspks; spk(idx)];
         if(period)
             nsac = nsac + length(Trials(j).Trigger) * (times(end)-times(1))/period;
@@ -236,7 +265,7 @@ elseif(strmatch('box',flag))
       clipping = width;
   end
   if nsac == 0
-      fullsdf = [rates(width:end-width+1)];
+      fullsdf = [rates(2:end-width+1)];
   elseif clipping
       fullsdf = [rates(width:end-width+1)] .* 10000/(width * nsac);
                       clipping = width;
@@ -251,6 +280,9 @@ elseif(strmatch('kernel',flag))
 elseif(strmatch('raw',flag))
   fullsdf = spikes;  
 end
+%times(1) is an extra element added at the start, to account for
+%smoothing with. So length of sdf should be length(times)-1 at this
+%point
 if clipping
     idx = (times - times(1));
     idx = idx(find(idx > clipping)) -clipping;
@@ -259,7 +291,9 @@ else
     idx = (times - times(1));
     idx = idx(2:end);
 end
-
+sid = find(spikebins >= times(2) & spikebins <= times(end));
+spikes = spikes(sid);
+details.spikebins = spikebins(sid);
 
 if period
     w = round(period/2);
@@ -267,9 +301,14 @@ if period
 end
 
 idx = round(idx(find(idx <= length(fullsdf))));
+%if length(idx) < ntimepts
+%    idx = [idx(1)-1 idx];
+%end
 sdf = fullsdf(idx);
 nspikes = sum(spikes);
-
+if getallspks
+    spikes = allspks;
+end
 
     
   

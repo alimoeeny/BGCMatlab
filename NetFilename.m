@@ -1,15 +1,8 @@
 function [netname, netdir] = NetFilename(name, varargin)
 
 [a,b] = fileparts(name);
-
-if strfind(name,'/lem')
-    monkey = 'lem';
-elseif strfind(name,'/jbe')
-    monkey = 'jbe';
-else
-    monkey = 'lem';
-end
-
+monkey = GetMonkeyName(name);
+name = strrep(name,'\','/')
 netname = regexprep(name, ['.*/' monkey '/'],['Z:/bgc/data/' monkey '/']);
 if strcmp(netname, name) %no match
     netname = [];

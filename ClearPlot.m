@@ -1,6 +1,7 @@
 function ClearPlot(a)
-%ClearPlot() Clears a plot
-%ClearPlot(a) Clears the plot in handle a
+%ClearPlot() Clears a plot - deleting all axes 
+%unlike clf does NOT remove menus etc that the user has added
+%ClearPlot(h) Clears the plot in handle h
 
 
 if nargin

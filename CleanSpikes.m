@@ -68,3 +68,8 @@ if dvfile & ~exist(dvfile)
     fprintf('Saving dVdt to %s\n',dvfile);
     save(dvfile,'dVdt');
 end
+if ~isfield(ch,'codes')
+    ch.codes = zeros(size(ch.values,1),2,'uint8');
+elseif size(ch.codes,2) ==1
+    ch.codes = repmat(ch.codes,1,2);
+end

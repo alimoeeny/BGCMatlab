@@ -23,6 +23,7 @@ f = params(1);
 npix = 256;
 ym = 0;
 x = [];
+ym = 0;
 
 j = 1;
 while j < nargin
@@ -85,6 +86,9 @@ if length(params)> 6
   else
     sy = sx; 
   end
+end
+if length(params) > 8
+    ym = params(9);
 end
 npts = imsize;
 

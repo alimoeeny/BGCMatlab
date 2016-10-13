@@ -44,12 +44,17 @@ end
 if(~isfield(Trials,'Trigger'))
   [Trials.Trigger] = deal(0);
 end
+nt = length(cat(2,Trials.Trigger));
+
 
 len = length(lfpavg);
+lfpall = ones(len,nch,nt) .* NaN;
+nt = 0;
 for tr = 1:length(Trials);
     lfp = Trials(tr).LFP;
     if ~isempty(lfp)
         for j = 1:length(Trials(tr).Trigger)
+            nt = nt+1;
             first = 1+round((Trials(tr).Trigger(j) +times(1)+Trials(tr).Start(1)-Trials(tr).lfptime)./(samplerate * 10000));
 %            first = first+Trials(tr).lfpo;
         if first <= 0  %looking for samples that precede the data
@@ -73,16 +78,26 @@ for tr = 1:length(Trials);
             iend = lfplen;
         end
         if ~isnan(last) & ~isnan(start) & iend > istart
+            if 0
+            lfpall(istart:iend,:,nt) = lfp(start:last,:);
+            else
+                idx = find(~isnan(mean(lfp(start:last,:),2)));
             lfpavg(istart:iend,:) = lfpavg(istart:iend,:) + lfp(start:last,:);
             lfpavn(istart:iend) = lfpavn(istart:iend)+1;
+            end
         end
 %        lfpall(nlfp,:) = lfp(start:end);
         end
     end
 end
-idx = find(lfpavn == 0);
-lfpavg(idx) = 0;
-lfpavn(idx) = -1;
-avg = lfpavg ./ repmat(lfpavn,1,nch);
+if 0
+    avg = nanmean(lfpall,3);
+    lfpavn = sum(~isnan(sum(lfpall,2)),3);
+else
+    idx = find(lfpavn == 0);
+    lfpavg(idx) = NaN;
+    lfpavn(idx) = 0;
+    avg = lfpavg ./ repmat(lfpavn,1,nch);
+end
 details.n = lfpavn;
 details.ntrials = nspk;

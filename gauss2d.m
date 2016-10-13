@@ -38,7 +38,7 @@ elseif(length(params) == 2)
   if setmean == 0 
       mean(1) = 0; mean(2) = 0;
   end
-  sd = params;
+  sd = param
   amp = 1/(sd(1) * sd(2) * (2 * pi)^0.5);    
 else
   mean(1) = params(1);
@@ -52,13 +52,12 @@ else
   end
 end
 
-X = meshgrid(x,x);
-Y = X';
-r = sqrt(X.^2 + Y.^2);
-
-
+[X, Y] = meshgrid(x,x);
 xp = X - mean(1);
 yp = Y - mean(2);
+r = sqrt(xp.^2 + xp.^2);
+
+
 Z = base + amp .* exp(-(xp.^2)/(2 * sd(1) .^2)) .* exp(-(yp.^2)/(2 * sd(2) .^2));
 
 

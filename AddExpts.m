@@ -1,4 +1,8 @@
 function Expt = AddExpts(varargin)
+%Combines a list of Expts into one,
+%Expt = AddExpts(expt1, expt2, expt3....)
+%fills fields of Expt.Trials to be union of those in expt1 to exptn
+%See also CombineExpts
 
 Expt = [];
 

@@ -1,11 +1,20 @@
-head	1.14;
+head	1.16;
 access
 	bgc;
 symbols;
-locks
-	bgc:1.14; strict;
+locks; strict;
 comment	@// @;
 
+
+1.16
+date	2012.11.27.18.24.24;	author bgc;	state Exp;
+branches;
+next	1.15;
+
+1.15
+date	2012.11.27.18.23.13;	author bgc;	state Exp;
+branches;
+next	1.14;
 
 1.14
 date	2012.05.10.13.56.23;	author bgc;	state Exp;
@@ -83,7 +92,7 @@ desc
 @
 
 
-1.14
+1.16
 log
 @*** empty log message ***
 @
@@ -109,7 +118,8 @@ text
 %                       signal, smoothed with b.
 %ExptPsych(Expt,'pcolor',[n b])
 %                       plots functions for binned groups of n trails
-%                       as a pseudocolor plot.
+%                       as a pseudocolor plot. If b is given, the bin is
+%                       moved this distane between samples
 %ExptPsych(Expt,'pcolorfit',[n b])
 %                       fits psf to each group.
             
@@ -173,6 +183,7 @@ labelbias = 0;
 show.th = 0;
 show.bias = 0;
 choiceonly = 1;
+legendlabels = {};
 
 typestr = '';
 explabel = ''; % fot the title
@@ -190,7 +201,7 @@ elseif strcmp(Expt.Stimvals.et,'dx')
     type{1} = 'dx';
     type{2} = Expt.Stimvals.e2;
     typestr = 'DT';
-    if sum(strcmp(Expt.Stimvals.e2,{'rb' 'or'})
+    if sum(strcmp(Expt.Stimvals.e2,{'rb' 'or'}))
         collapse = [0 0 0];
     end
 elseif strcmp(Expt.Stimvals.et,'TwoCylDisp')
@@ -216,6 +227,10 @@ end
 if isfield(Expt.Trials,'rwsum') %online data
     explabel = [explabel sprintf('rw%.1f',Expt.Trials(end).rwsum)];
 end
+if strcmp(type{1},'Dc') && strcmp(type{2},'or')
+    type{2} = 'ori';
+end
+
 if strmatch(type{2},'ori')  & ~isfield(Expt.Trials,'ori')
     for j = 1:length(Expt.Trials)
         Expt.Trials(j).ori = Expt.Trials(j).or(end);
@@ -234,7 +249,7 @@ end
     end
     
     
-if length(varargin) && strcmp(varargin{end},'byrw')
+if length(varargin) & strcmp(varargin{end},'byrw')
     [nrw, rws] = Counts([Expt.Trials.rw]);
     rws = rws(rws > 0);
     if length(rws) < 5
@@ -278,6 +293,9 @@ while j <= length(varargin)
        show.th = 1;
    elseif strncmpi(varargin{j},'labelbias',7)
        show.bias = 1;
+   elseif strncmpi(varargin{j},'legendlabels',7)
+       j = j+1;
+       legendlabels = varargin{j};
    elseif strncmpi(varargin{j},'mintrials',5)
        j = j+1;
        mintrials = varargin{j};
@@ -364,14 +382,20 @@ while j <= length(varargin)
 end
 
 if ~isfield(Expt.Trials,type{1}) || (~isfield(Expt.Trials, type{2}) && length(type{2}))
-    fprintf('%s Doesn''t have values for Psych\n',Expt.Header.expname);
+    if isfield(Expt.Header,'expname')
+        fprintf('%s Doesn''t have values for Psych\n',Expt.Header.expname);
+    end
     return;
 end
 
 
 nt = sum(abs([Expt.Trials.RespDir]) > 0);
 if nt < mintrials
-    fprintf('%s too few response trials\n',Expt.Header.expname);
+    if isfield(Expt.Header,'expname')
+        fprintf('%s too few response trials\n',Expt.Header.expname);
+    elseif isfield(Expt.Header,'Name')
+        fprintf('%s too few response trials\n',Expt.Header.Name);
+    end
     return;
 end
 
@@ -505,18 +529,20 @@ elseif pntrials(1) > 0
     Y = ones(k+1,max(lens)+1) .* NaN;
     Z = ones(k+1,max(lens)+1) .* NaN;
     for j = 1:nex
+        [xs, xid] = sort([pp{j}.x]);
         for k = 1:lens(j)
-            X(j,k) = pp{j}(k).x;
+            X(j,k) = pp{j}(xid(k)).x;
             Y(j,k) = tn(j);
-            Z(j,k) = pp{j}(k).resp./pp{j}(k).n;
+            Z(j,k) = pp{j}(xid(k)).resp./pp{j}(xid(k)).n;
         end
-            X(j,k+1) = pp{j}(k).x + mean(diff([pp{j}.x]));
+            X(j,k+1) = pp{j}(xid(k)).x + mean(diff([pp{j}.x]));
             Y(j,k+1) = tn(j);
-            Z(j,k+1) = pp{j}(k).resp./pp{j}(k).n;
+            Z(j,k+1) = pp{j}(xid(k)).resp./pp{j}(xid(k)).n;
     end
     end
     f = gcf;
     GetFigure(ptag);
+    hold off; 
     pcolor(X',Y',Z');
     shading('flat');
     colorbar;
@@ -757,7 +783,9 @@ else
                 fit.fith = ph.fith;
                 h(j) = ph.fith;
                 if j > length(labels)
-                    if length(uvals{3}) > 1
+                    if length(legendlabels) >= j
+                        labels{j} = legendlabels{j};
+                    elseif length(uvals{3}) > 1
                         labels{j} = [sprintf('%s=',type{3}) sprintf('%.3f ',unique([pp(id).z]))];
                     else
                         labels{j} = [sprintf('%s=',type{2}) sprintf('%.3f ',unique([pp(id).y]))];
@@ -1091,6 +1119,70 @@ params = cat(1, params, [x SSD]);
 setappdata(gcf,'params',params);
 
 
+@
+
+
+1.15
+log
+@type{2} 'or' -> 'ori' to make online plots for DCOR work.
+@
+text
+@d22 2
+a23 1
+%                       as a pseudocolor plot.
+d87 1
+d131 4
+d137 1
+a137 5
+        if length(Expt.Trials(j).or)
+            Expt.Trials(j).ori = Expt.Trials(j).or(end);
+        else
+            Expt.Trials(j).ori = NaN;
+        end
+d153 1
+a153 1
+if length(varargin) && sum(strcmp(varargin{end},'byrw'))
+d197 3
+d286 3
+a288 1
+    fprintf('%s Doesn''t have values for Psych\n',Expt.Header.expname);
+d433 1
+d435 1
+a435 1
+            X(j,k) = pp{j}(k).x;
+d437 1
+a437 1
+            Z(j,k) = pp{j}(k).resp./pp{j}(k).n;
+d439 1
+a439 1
+            X(j,k+1) = pp{j}(k).x + mean(diff([pp{j}.x]));
+d441 1
+a441 1
+            Z(j,k+1) = pp{j}(k).resp./pp{j}(k).n;
+d446 1
+d687 3
+a689 1
+                    if length(uvals{3}) > 1
+@
+
+
+1.14
+log
+@*** empty log message ***
+@
+text
+@d103 1
+a103 1
+    if sum(strcmp(Expt.Stimvals.e2,{'rb' 'or'})
+d131 5
+a135 1
+        Expt.Trials(j).ori = Expt.Trials(j).or(end);
+d151 1
+a151 1
+if length(varargin) && strcmp(varargin{end},'byrw')
+d288 5
+a292 1
+    fprintf('%s too few response trials\n',Expt.Header.expname);
 @
 
 

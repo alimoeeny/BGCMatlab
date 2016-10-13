@@ -17,6 +17,7 @@ function PlotEm(Expt, trials, varargin)
 % PlotEm(Expt, 1, 'xy') plots v,h positions on an X-Y plot
 %  PlotEm(Expt, 1, 'cv') conjugate H, H vergence, and conjugate V
 %
+% PlotEm(Expt, trials, 'yrange' [a b]) sets y range
 
 plottype = 0;
 plotavg = 0;
@@ -26,6 +27,7 @@ figlabel{1} = 'EmPlotYT';
 showtime = 0;
 nohold = 1;
 eyes = 2;
+showpupil = 0;
 yrange = [];
 Text = [];
 calib = [1 1 1 1 1 1; 0 0 0 0 0 0];
@@ -53,6 +55,8 @@ while j <= length(varargin)
         trials = find(ismember([Expt.Trials.id],ids));
     elseif strncmpi(varargin{j},'means',4)
         plotmeans = 1;
+    elseif strncmpi(varargin{j},'pupil',4)
+        showpupil =1;
     elseif strncmpi(varargin{j},'three',4)
         eyes = 3;
     elseif strncmpi(varargin{j},'speed',2)
@@ -76,6 +80,7 @@ if isnew
     DATA.yrange = yrange;
     DATA.calib = calib;
     DATA.neyes = eyes;
+    DATA.pupil = showpupil;
         bp = [10 10 40 20];
     uicontrol(efig,'style','pushbutton','string','>>','Position',bp,'Tag','NextTrial',...
         'Callback', {@PlayNextTrial, 1});
@@ -85,6 +90,7 @@ if isnew
     set(gcf,'UserData',DATA);
 else  %may be setting something
     DATA = get(efig,'UserData');
+    DATA.Expt = Expt; %update with new expt
     if ~isempty(yrange)
         DATA.yrange = yrange;
     end
@@ -97,6 +103,20 @@ end
 if ~isempty(Text) & plotsac == 1
     PlotTrialSaccades(DATA, trials);
     return;
+elseif plotsac == 1 
+%kludge. Doesn't seen to get timing right...
+    if ~isfield(DATA,'Expt');
+        DATA.Expt = Expt;
+    end
+    if ~isfield(DATA,'calib')
+    DATA.calib(1,:) = [1 1 1 1];
+    DATA.calib(2,:) = [0 0 0 0];
+    DATA.neyes = 2;
+    DATA.pupil = 0;
+    DATA.yrange = [];
+    end
+    PlotTrialSaccades(DATA, trials);
+    return;
 end
 
 if ~isfield(Expt.Header,'CRsamplerate')
@@ -107,8 +127,11 @@ if ~isfield(Expt.Trials,'Trial')
         Expt.Trials(j).Trial = j;
     end
 end
+if isfield(DATA,'calib')
 scales = DATA.calib(1,:);
-
+else
+    scales = [1 1 1 1 1 1];
+end
 if plotavg
     buflen = NaN;
     for j = 1:length(trials);
@@ -171,13 +194,22 @@ end
 for j = 1:ntrials;
     if ~plotavg
         if isfield(Expt.Trials,'EyeData')
-            ev.lh = Expt.Trials(trials(j)).EyeData(:,1);
+            EV = Expt.Trials(trials(j)).EyeData;
+            ev.lh = EV(:,1);
             ev.rh = Expt.Trials(trials(j)).EyeData(:,2);
             ev.lv = Expt.Trials(trials(j)).EyeData(:,3);
             ev.rv = Expt.Trials(trials(j)).EyeData(:,4);
+            if size(EV,2) == 6
+                ev.xh = EV(:,5);
+                ev.xv = EV(:,6);
+            end
 
         else
             ev = Expt.Trials(trials(j)).Eyevals;
+        end
+        if showpupil && isfield(Expt.Trials,'pupil')
+            pupil = Expt.Trials(trials(j)).pupil;
+            pupil(pupil<-4) = NaN;
         end
     end
 % sometimes # samples differs by 1
@@ -230,6 +262,9 @@ for j = 1:ntrials;
             plot(times,ev.xv(rid).*scales(6),'c');
             plot(times,ev.xh(rid).*scales(5),'g');
         end
+        if showpupil
+            plot(times,pupil(rid),'k');
+        end
     end
 end
 DATA.trial = trials(1);
@@ -259,12 +294,25 @@ DATA.trial = DATA.trial+step;
 end
 hold off;
 PlotTrialSaccades(DATA, DATA.trial);
+T = DATA.Expt.Trials(DATA.trial);
 if isfield(DATA.Expt.Trials,'fx') && isfield(DATA.Expt.Trials,'fy')
-    xs = sprintf('(%.1f,%.1f)',DATA.Expt.Trials(DATA.trial).fx,DATA.Expt.Trials(DATA.trial).fy);
+    xs = sprintf('(%.1f,%.1f)',T.fx,T.fy);
 else
 xs='';
 end
-title(sprintf('Trial %d (id%d) at %.3f%s',DATA.trial,DATA.Expt.Trials(DATA.trial).id,DATA.Expt.Trials(DATA.trial).Start(1)/10000,xs));
+if isfield(T,'RespDir')
+    score = T.RespDir * T.rwdir;
+    if score == -1
+        c = 'W';
+    elseif score == 1
+        c = 'G';
+    else
+        c = 'B';
+    end
+else
+    c = 'F';
+end
+title(sprintf('Trial %d%c (id%d) at %.3f%s',DATA.trial,c,DATA.Expt.Trials(DATA.trial).id,DATA.Expt.Trials(DATA.trial).Start(1)/10000,xs));
 set(gcf,'UserData',DATA);
 
 function speed = eyespeed(ev, eye)
@@ -314,6 +362,9 @@ for j = 1:length(trials)
         npts = min([length(Expt.Trials(t).Eyevals.rh) length(Expt.Trials(t).Eyevals.lh) length(Expt.Trials(t).Eyevals.rv) length(Expt.Trials(t).Eyevals.lv)]);
         Eyevals = Expt.Trials(t).Eyevals;
     end
+    if isfield(Expt.Trials,'pupil')
+        pupil = Expt.Trials(trials(j)).pupil;
+    end
     ts = ([1:npts] * Expt.Header.CRrates(1))-pre;
     smps = 1:npts;
     endtime = start+max(ts);
@@ -326,7 +377,9 @@ for j = 1:length(trials)
     plot(ts,Eyevals.xh(smps).*scales(5),'g');
     plot(ts,Eyevals.xv(smps).*scales(6),'m');
     end
-    
+    if DATA.pupil
+        plot(ts,pupil(smps),'k');
+    end
     if length(sid)
     id = find(Text.times(sid)> start & Text.times(sid)< endtime);
     ts = ([1:length(Eyevals.rv)] * Expt.Header.CRrates(1))-pre;
@@ -338,13 +391,35 @@ for j = 1:length(trials)
     else
         yl = get(gca,'ylim');
     end
+    tr = trials(j);
+    T = Expt.Trials(tr);
     if isfield(Expt.Trials,'Saccades')
-        tr = trials(j);
         for k = 1:length(Expt.Trials(tr).Saccades)
             [a, ti] = min(abs(ts-(Expt.Trials(tr).Saccades(k).peakt./10000-pre)));
             y(1) = 0;
             y(2) = Expt.Trials(tr).Saccades(k).size;
             plot([ts(ti) ts(ti)],y,'r')
+        end
+    end
+    if isfield(Expt.Trials,'rwtimes')
+        if tr > 1
+            lastt = Expt.Trials(tr-1).rwtimes;
+        else
+            lastt = 0
+        end
+        lastt = lastt(lastt>0);
+        t = T.rwtimes(T.rwtimes>0);
+        t = [lastt t];
+        for k = 1:length(t)
+            rt = (t(k)-T.Start(1))./10000; %since start in sec
+            [a, ti] = min(abs(ts-rt));
+            y = get(gca,'ylim');
+            y(1) = 0;
+            if rt+0.2 > Expt.Header.emtimes(1)/10000;
+                plot([ts(ti) ts(ti)],y,'k--');
+            else
+                fprintf('Previous reward %.2f before Start\n',rt);
+            end
         end
     end
     for k = 1:length(id)

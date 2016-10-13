@@ -15,6 +15,7 @@ function [tf, tflist] = GetEval(Expt,type,flag)
 
 tnum = 0;
 getmode = 0;
+tf = [];
 if(nargin > 2)
     if isnumeric(flag)
         tnum = flag;
@@ -32,16 +33,72 @@ end
 stimtypes = {'none' 'gabor' 'rds' 'grating' 'bar' 'circle' 'rect' 'square' 'probe' ...
     '2grating' 'cylinder' 'corrug' 'sqcorrug' 'twobar' 'rls' 'annulus' 'rdssine' 'nsine' 'rlssine' 'radial' 'image' 'chacker'};
 
+if isempty(Expt)
+    tf = NaN;
+    return;
+end
 if strcmp(type,'probesep')
     [tf, tflist] = ReadPenSep(Expt.Header);
     return;
+elseif strcmpi(type,'probe')
+    if isfield(Expt.Header,'probe')
+       tf = Expt.Header.probe;
+       tflist = Expt.Header.probe;
+    else
+        tf = GetProbeFromName(GetEval(Expt,'name'));
+    end
+    return;
+elseif sum(strcmpi(type,{'duration'}))
+    if isfield(Expt.Trials,'dur')
+        tflist = sum([Expt.Trials.dur]);
+        tf = sum(tflist);
+    else
+        tflist = expt.TrialVals(Expt,'dur');
+        tf = sum(tflist);
+    end
+elseif sum(strcmpi(type,{'name', 'shortname'}))
+    if isfield(Expt.Header,'expname')
+        tflist = Expt.Header.expname;
+        tf = Expt.Header.expname;
+    else
+        tf = Expt2Name(Expt);
+        tflist = '';
+    end
+    if isfield(Expt.Header,'loadname')
+        tf = Expt.Header.loadname;
+    elseif isfield(Expt.Header,'name')
+        tf = Expt.Header.name;
+    elseif isfield(Expt.Header,'Name')
+        tf = Expt.Header.Name;
+    end
+    if strcmp(type,'shortname')
+       [~,tf] = fileparts(tf);
+    end
+    return;
 end
 
-if(isfield(Expt.Trials,type))
+
+if iscell(Expt)
+    if nargin < 3
+      flag = 'mode';
+    end
+    for j = 1:length(Expt)
+        [tf(j), tflist{j}] = GetEval(Expt{j},type,flag);
+    end
+    return;
+end
+if ~isfield(Expt,'Trials')
+    return;
+end
+if(isfield(Expt.Trials,type)) && ~isempty(Expt.Trials)
   if length(Expt.Trials(1).(type)) > 1
       x = [];
       for j = 1:length(Expt.Trials)
+          if ischar(Expt.Trials(j).(type))
+              x{j} = Expt.Trials(j).(type);
+          else
           x = [x; Expt.Trials(j).(type)];
+          end
       end
   else
       x = cat(1,Expt.Trials.(type));
@@ -58,6 +115,9 @@ if(isfield(Expt.Trials,type))
   tflist = sort(unique(x(:)));
   if tnum > 0 && tnum <= length(Expt.Trials)
       tf = Expt.Trials(tnum).(type);
+  elseif iscellstr(x)
+       [a,b] = Counts(x);     
+      tf = b{1};
   elseif(getmode == 1)
     tf = mode(x(:));
   elseif(getmode == 2)
@@ -78,6 +138,12 @@ elseif isfield(Expt,'Stimvals') & isfield(Expt.Stimvals,type)
   else
   tflist(1) = tf;
   end
+elseif strcmp(type,'rc')
+    if isfield(Expt.Header,'rc')
+        tf = Expt.Header.rc;
+    else
+        tf = 0;
+    end
 elseif strcmp(type,'sz')
     if isfield(Expt.Trials,'wi')
       x = cat(1,Expt.Trials.wi);
@@ -85,10 +151,20 @@ elseif strcmp(type,'sz')
     elseif isisfield(Expt,'Stimvals') & isfield(Expt.Stimvals,'wi')
         tf = Expt.Stimvals.wi;
     end
+elseif sum(strcmp(type,{'dO' 'dP'}))
+    E = FillTrials(Expt,type);
+    x = cat(1,E.Trials.(type));
+    tf = mean(x);
+elseif strcmp(type,'stimtag')
+    if ~isfield(Expt.Stimvals,'stimtag')
+        x = {};
+       tf = ''; 
+       tflist = {};
+    end
 else
     tf = NaN;
     tflist(1) = tf;
-end
+    end
 
 
 function [d, dlist] = ReadPenSep(Header)
@@ -131,4 +207,4 @@ if isnan(d)
 end
 
 
-dlist(1) = d;
+dlist(1) = d(1);

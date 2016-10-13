@@ -1,4 +1,4 @@
-function [pp, details] = ExptPsych(Expt, varargin)
+function [pp, details, Expt] = ExptPsych(Expt, varargin)
 %function [pp, details] = ExptPsych(Expt, varargin)
 %  Fit pyschometric funtion to an Expt file that has responses.
 %
@@ -19,13 +19,145 @@ function [pp, details] = ExptPsych(Expt, varargin)
 %                       signal, smoothed with b.
 %ExptPsych(Expt,'pcolor',[n b])
 %                       plots functions for binned groups of n trails
-%                       as a pseudocolor plot.
+%                       as a pseudocolor plot. If b is given, the bin is
+%                       moved this distane between samples
 %ExptPsych(Expt,'pcolorfit',[n b])
-%                       fits psf to each group.
+%                       fits psf to each group. Slow!
+%
+%Except in recognized formats, the expt1 variable is used as the metameter.
+%If expt2 is set, the usual default is to collapse across these. To force
+%separate plotting, use ..,'collapse',[0 0 0]
+%see also Expt2Blocks
+%Curretnly only certain parateters are allowed for expt3:
+%   tr, dd, nf, uStim
+%
+%   ...,'type2',param forces value to use for dimension 2
+%   ...,'type3',param forces value to use for dimension 3
+%
+%       ..., 'twomeans') fits two biases and one slope to two data sets
+%       ..., 'twomeans', 'fixsd',sigma)  fits two biases to two data
+%sets, forcing slope parameter to sigma (e.g. for following timecourse of
+
+%BGC could make allowing any expt3 the default, then set collapse(3) as
+%default of some types (fx,fy etc)
             
+labelb = 'Sequence';
+mintrials = 10;
+labelling = 'default';
+type{1} = 'Dc';
+type{2} = 'NotSet';
+type{3} = '';
+showplot = 1;
+psfargs = {};
+pp = [];
+details = [];
+smoothw = [0 0];
+plotreward = 0;
+plotsequence = 0;
+plotfit = 0;
+plotdate = 0;
+shown = 1;
+pntrials = 0;
+ptag = 'Psych Pcolor';
+tag = '';
+maintag = [];
+nofit = 0;
+plottype = 1;
+minreps = 4;
+signals = [];
+collapse = [0 1 0]; %collapse exp2 by default. Becauce?? 
+coloroff = 0;
+verbose = 0;
+mintrials = 10;
+predictchoice = 0;
+predictcrit = NaN;
+prednoise = 0;
+labelth = 0;
+labelbias = 0;
+show.th = 0;
+show.bias = 0;
+state.calcconsistency = 0;
+choiceonly = 1;
+legendlabels = {};
+useflip = 0;
 
+typestr = '';
+explabel = ''; % fot the title
+colors = mycolors;
+forcetype = 0;
+forcecollapse = 0;
+columns = [1 1 1];
+
+j = 1;
+while j <= length(varargin)
+   if strncmpi(varargin{j},'nmin',3)
+       j = j+1;
+       minreps = varargin{j};
+       psfargs = {psfargs{:} 'nmin' varargin{j}};
+   elseif strncmpi(varargin{j},'color',7)
+       j = j+1;
+       coloroff = varargin{j};
+   elseif strncmpi(varargin{j},'forcecolor',7)
+       j = j+1;
+       forcecolor = varargin{j};
+       for j = 1:length(colors)
+           colors{j} = forcecolor;
+       end
+   elseif strncmpi(varargin{j},'collapse',5)
+       j = j+1;
+       collapse = varargin{j};
+       forcecollapse = 1;
+   elseif strncmpi(varargin{j},'consistency',5)
+       state.calcconsistency = 1;
+   elseif strncmpi(varargin{j},'fitpredict',7)
+       fitpredict = 1;
+       predictchoice = 1;
+   elseif strncmpi(varargin{j},'fixsd',7)
+       j = j+1;
+       psfargs = {psfargs{:} varargin{j-1:j}};
+   elseif strncmpi(varargin{j},'labelblock',7)
+       labelling = 'blocknumber';
+   elseif strncmpi(varargin{j},'labelth',7)
+       show.th = 1;
+   elseif strncmpi(varargin{j},'labelbias',7)
+       show.bias = 1;
+   elseif strncmpi(varargin{j},'legendlabels',7)
+       j = j+1;
+       legendlabels = varargin{j};
+   elseif strcmp(varargin{j},'type')
+       forcetype =1;
+       j = j+1;
+       if iscell(varargin{j})
+           type = varargin{j};
+       elseif ischar(varargin{j})
+           type{1} = varargin{j};
+           type{2} = '';
+       end
+   elseif strncmpi(varargin{j},'useflip',5)
+       useflip = 1;
+   elseif strncmpi(varargin{j},'mintrials',5)
+       j = j+1;
+       mintrials = varargin{j};
+   end
+   j = j+1;
+end
+
+
+if isempty(Expt)
+    return;
+end
 fitpredict = 0;
+if length(varargin) > 0 && strncmpi(varargin{1},'blocks',6)
+    Expts = Expt2Blocks(Expt);
+    if length(varargin) >1 && isnumeric(varargin{2})
+        ExptPsych(Expts(varargin{2}),varargin{3:end});
+    else
+        ExptPsych(Expts,varargin{2:end});
+    end
+    return;
+end
 
+        
 if iscell(Expt)
     if length(varargin) > 0 && strncmpi(varargin{1},'sum',3)
         E = CombineExpts(Expt);
@@ -37,13 +169,22 @@ if iscell(Expt)
     h = [];
     k = 1;
     for j = 1:length(Expt)
-        if sum([Expt{j}.Trials.RespDir] ~= 0) > 20
+        if isfield(Expt{j},'Trials') && sum([Expt{j}.Trials.RespDir] ~= 0) > mintrials
 
         [pp{k}, details{k}] = ExptPsych(Expt{j},'color',j-1,varargin{:});
         if sum(isfield(details{k},{'labels' 'handles'})) ==2 && length(details{k}.labels) == length(details{k}.handles)
-           labels = {labels{:} details{k}.labels{:}};
+            if strcmp(labelling,'blocknumber')
+                if isfield(Expt{j},'last')
+                    labels = {labels{:} sprintf('E%d:%d-%d',GetExptNumber(Expt{j}),Expt{j}.first,Expt{j}.last)};
+                else
+                    labels = {labels{:} sprintf('E%d',GetExptNumber(Expt{j}))};
+                end
+            else
+                labels = {labels{:} details{k}.labels{:}};
+            end
            h = [h details{k}.handles];
         end
+        hold on;
         drawnow;
         k = k+1;
         end
@@ -54,54 +195,55 @@ if iscell(Expt)
     return;
     end
 end
-type{1} = 'Dc';
-type{2} = 'ori';
-showplot = 1;
-psfargs = {};
-pp = [];
-details = [];
-smoothw = [0 0];
-plotreward = 0;
-plotfit = 0;
-shown = 0;
-pntrials = 0;
-ptag = 'Psych Pcolor';
-maintag = [];
-nofit = 0;
-plottype = 1;
-minreps = 4;
-signals = [];
-collapse = [0 1 0]; %collapse exp2 by default. Beauce?? 
-coloroff = 0;
-verbose = 0;
-mintrials = 10;
-predictchoice = 0;
-predictcrit = NaN;
-prednoise = 0;
-labelth = 0;
-labelbias = 0;
-show.th = 0;
-show.bias = 0;
-choiceonly = 1;
 
-typestr = '';
-explabel = ''; % fot the title
-if strcmp(Expt.Stimvals.et,'or') && strcmp(Expt.Stimvals.e2,'ob')
+
+holdstate = ishold;
+if forcetype
+  
+elseif isfield(Expt.Trials,'psyv') && length(unique([Expt.Trials.psyv])) > 1
+    type{1} = 'psyv';
+    if strcmp(type{2},'NotSet')
+        type{2} = Expt.Stimvals.e2;
+        if strcmp(type{2},'noise') && strcmp(Expt.Stimvals.e3,'pnoise')
+            type{2} = 'pnoise';
+        end
+    end
+elseif strcmp(Expt.Stimvals.e2 ,'mixac') && strcmp(Expt.Stimvals.et ,'dx')
+    type{1} = 'dxcorr';
+    type{2} = 'dxabs';
+    for j = 1:length(Expt.Trials)
+        Expt.Trials(j).dxcorr = (0.5 - Expt.Trials(j).mixac) .*sign(Expt.Trials(j).dx);
+        Expt.Trials(j).dxabs = abs(Expt.Trials(j).dx);
+    end
+elseif strcmp(Expt.Stimvals.et,'or') && strcmp(Expt.Stimvals.e2,'ob')
     type{2} = 'or';
     for j = 1:length(Expt.Trials)
-        if Expt.Trials(j).ob < 0
+        if isempty(Expt.Trials(j).ob)
+            Expt.Trials(j).ob = 0;
+        elseif Expt.Trials(j).ob < 0
             Expt.Trials(j).or = Expt.Trials(j).or - 90;
         end
-        Expt.Trials(j).cv = sd2cv(abs(Expt.Trials(j).ob));
     end
+    cv = num2cell(sd2cv(abs([Expt.Trials.ob])));
+    [Expt.Trials.cv] = cv{:};
     type{1} = 'cv';
     typestr = 'ORBW';
 elseif strcmp(Expt.Stimvals.et,'dx')
+    if strcmp(Expt.Stimvals.e2,'Dc')
+        type{2} = 'dx';
+        type{1} = Expt.Stimvals.e2;
+        typestr = 'DCDP';
+        collapse = [0 0 0];
+    else
+    if sum(strcmp(Expt.Stimvals.e2,{'rb' 'or' 'mixac' 'cz' 'co' 'Dc'}))
+        collapse = [0 0 0];
+    end
     type{1} = 'dx';
     type{2} = Expt.Stimvals.e2;
     typestr = 'DT';
-    if sum(strcmp(Expt.Stimvals.e2,{'rb' 'or'}))
+    if sum(strcmp(Expt.Stimvals.e2,{'rb' 'or' 'mixac' 'cz' 'co'}))
         collapse = [0 0 0];
+    end
     end
 elseif strcmp(Expt.Stimvals.et,'TwoCylDisp')
     type{1} = 'dx';
@@ -121,21 +263,48 @@ else
     type{2} = Expt.Stimvals.e2;
     collapse = [0 0 0];
 end
+if strcmp(type{2},'NotSet')
+    type{2} = 'ori';
+end
+
+if forcecollapse == 0
+    if strcmp(type{2},'pnoise')
+        collapse(2) = 0;
+    end
+end
 
 
 if isfield(Expt.Trials,'rwsum') %online data
     explabel = [explabel sprintf('rw%.1f',Expt.Trials(end).rwsum)];
 end
-if strmatch(type{2},'ori')  & ~isfield(Expt.Trials,'ori')
+if strcmp(type{1},'Dc') && strcmp(type{2},'or')
+    type{2} = 'ori';
+elseif strcmp(type{2},'Dc') && strcmp(type{1},'or')
+    type{1} = 'ori';
+end
+
+if strcmp(type{2},'ori')  & ~isfield(Expt.Trials,'ori')
     for j = 1:length(Expt.Trials)
-        if length(Expt.Trials(j).or)
-            Expt.Trials(j).ori = Expt.Trials(j).or(end);
-        else
+        if isempty(Expt.Trials(j).or)
             Expt.Trials(j).ori = NaN;
+        else
+            Expt.Trials(j).ori = Expt.Trials(j).or(end);
         end
     end
 end
-    for j = 1:length(Expt.Trials)
+
+fillet = { [] [] []};
+if isfield(Expt.Stimvals,'et') && ~isfield(Expt.Trials,Expt.Stimvals.et)
+    fillet{1} = Expt.Stimvals.et;
+end
+if isfield(Expt.Stimvals,'e2') && ~isfield(Expt.Trials,Expt.Stimvals.e2)
+    fillet{2} = Expt.Stimvals.e2;
+end
+if isfield(Expt.Stimvals,'e3') && ~isfield(Expt.Trials,Expt.Stimvals.e3) && ~strcmp(Expt.Stimvals.e3,'e0')
+    fillet{3} = Expt.Stimvals.e3;
+end
+
+for j = 1:length(Expt.Trials)
         if isfield(Expt.Trials,'Start')
         starts(j) = Expt.Trials(j).Start(1);
         else
@@ -145,10 +314,17 @@ end
             Expt.Trials(j).Trial = j;
         end
         Expt.Trials(j).e0 = 0;
-    end
+        if isfield(Expt.Trials,'exvals')
+            for k = 1:length(fillet)
+                if ~isempty(fillet{k})
+                Expt.Trials(j).(fillet{k}) = Expt.Trials(j).exvals(k);
+                end
+            end
+        end
+end
     
     
-if length(varargin) && strcmp(varargin{end},'byrw')
+if length(varargin) & strcmp(varargin{end},'byrw')
     [nrw, rws] = Counts([Expt.Trials.rw]);
     rws = rws(rws > 0);
     if length(rws) < 5
@@ -173,15 +349,34 @@ if length(varargin) && strcmp(varargin{end},'byrw')
     return;
 end
 
+
+%Expt 3 types to be plotted separately by default
+if isfield(Expt.Stimvals,'e3') && sum(strcmp(Expt.Stimvals.e3,{'tr' 'nf' 'uS' 'dd'}))
+    type{3} = Expt.Stimvals.e3;
+end
+
+if isfield(Expt.Trials,'tr') %some guided responses included
+    if strcmp(type{2},'e0')
+        type{2} = 'tr';
+        collapse(2) = 0;
+    end
+end
+
 j = 1;
 while j <= length(varargin)
    if strncmpi(varargin{j},'nmin',3)
        j = j+1;
        minreps = varargin{j};
        psfargs = {psfargs{:} 'nmin' varargin{j}};
-   elseif strncmpi(varargin{j},'color',5)
+   elseif strncmpi(varargin{j},'color',7)
        j = j+1;
        coloroff = varargin{j};
+   elseif strncmpi(varargin{j},'forcecolor',7)
+       j = j+1;
+       forcecolor = varargin{j};
+       for j = 1:length(colors)
+           colors{j} = forcecolor;
+       end
    elseif strncmpi(varargin{j},'collapse',5)
        j = j+1;
        collapse = varargin{j};
@@ -192,6 +387,9 @@ while j <= length(varargin)
        show.th = 1;
    elseif strncmpi(varargin{j},'labelbias',7)
        show.bias = 1;
+   elseif strncmpi(varargin{j},'legendlabels',7)
+       j = j+1;
+       legendlabels = varargin{j};
    elseif strncmpi(varargin{j},'mintrials',5)
        j = j+1;
        mintrials = varargin{j};
@@ -199,6 +397,8 @@ while j <= length(varargin)
        nofit = 1;
    elseif strncmpi(varargin{j},'noplot',3)
        showplot = 0;
+   elseif strncmpi(varargin{j},'plotdate',6)
+       plotdate = 1;
    elseif strncmpi(varargin{j},'pcolor',3)
        if strncmpi(varargin{j},'pcolorfit',8)
            nofit = 0;
@@ -223,9 +423,13 @@ while j <= length(varargin)
        prednoise = varargin{j};
    elseif strncmpi(varargin{j},'reward',3)
        plotreward = 1;
+   elseif strncmpi(varargin{j},'sequence',3)
+       plotsequence = 1;
    elseif strncmpi(varargin{j},'shown',5)
-       psfargs = {psfargs{:} 'shown'};
        shown = 1;
+   elseif strncmpi(varargin{j},'noshown',5)
+       psfargs = {psfargs{:}};
+       shown = 0;
    elseif strncmpi(varargin{j},'show',3)
        j = j+1;
        show.(varargin{j}) = 1;
@@ -250,10 +454,16 @@ while j <= length(varargin)
        j = j+1;
        id = find([Expt.Trials.rw] >= varargin{j});
        Expt.Trials = Expt.Trials(id);
-
+   elseif strncmpi(varargin{j},'tag',3)
+       j = j+1;
+       tag = varargin{j};
    elseif strncmpi(varargin{j},'type2',5)
        j = j+1;
        type{2} = varargin{j};
+       if length(varargin) > j && isnumeric(varargin{j+1}) %set columt
+           j = j+1;
+           columns(2) = varargin{j};
+       end
    elseif strncmpi(varargin{j},'type3',5)
        j = j+1;
        type{3} = varargin{j};
@@ -277,15 +487,50 @@ while j <= length(varargin)
     j = j+1;
 end
 
+if isfield(Expt.Trials,'date')
+    details.date = median([Expt.Trials.date]);
+end
+
+if shown
+    psfargs = {psfargs{:} 'shown'};
+end
+
+if forcecollapse == 0
+%Expt types 2 that we do not want to collapse    
+    if sum(strcmp(type{2},{'pnoise' 'or'}))
+        collapse(2) = 0;
+    end
+end
+
+if ~isfield(Expt,'Header')
+    Expt.Header.expname = Expt2Name(Expt);
+    Expt.Header.rc = 0;
+elseif ~isfield(Expt.Header,'expname')
+    if isfield(Expt.Header,'name')
+        Expt.Header.expname = Expt.Header.name;
+    else
+        Expt.Header.expname = Expt2Name(Expt);
+    end
+end
+
 if ~isfield(Expt.Trials,type{1}) || (~isfield(Expt.Trials, type{2}) && length(type{2}))
     fprintf('%s Doesn''t have values for Psych\n',Expt.Header.expname);
     return;
 end
 
+if useflip
+    for j = 1:length(Expt.Trials)
+        Expt.Trials(j).RespDir = Expt.Trials(j).RespDir .* Expt.Trials(j).rwdir;
+    end
+end
 
 nt = sum(abs([Expt.Trials.RespDir]) > 0);
 if nt < mintrials
-    fprintf('%s too few response trials\n',Expt.Header.expname);
+    if isfield(Expt.Header,'expname')
+        fprintf('%s too few response trials\n',Expt.Header.expname);
+    elseif isfield(Expt.Header,'Name')
+        fprintf('%s too few response trials\n',Expt.Header.Name);
+    end
     return;
 end
 
@@ -294,6 +539,7 @@ id = find(abs([Expt.Trials.RespDir]) ==1); %only use choice trials by
 Expt.Trials = Expt.Trials(id);
 end
 
+sigvar = type{1};
 
 predchoices = [];
 if predictchoice && isfield(Expt.Trials,'pkresp')
@@ -326,9 +572,17 @@ if predictchoice && isfield(Expt.Trials,'pkresp')
     end
 end
 
+if ~isempty(tag)
+    GetFigure(tag);
+end
 
-if strcmp(typestr,'ORBW') & isfield(Expt.Trials,'se')
-    id = find(abs([Expt.Trials.cv]) < 0.01 & ismember([Expt.Trials.RespDir],[-1 1]));
+if state.calcconsistency & isfield(Expt.Trials,'se')
+    if strcmp(typestr,'ORBW')
+        id = find(abs([Expt.Trials.cv]) < 0.01 & ismember([Expt.Trials.RespDir],[-1 1]));
+        [Expt.Trials(id).psyv] = 0;
+    else
+        id = find(abs([Expt.Trials.psyv]) < 0.01 & ismember([Expt.Trials.RespDir],[-1 1]));
+    end
     [a,b,c] = CalcConsistency(Expt.Trials(id));
     details.consistency = a;
     details.seedrpts = c;
@@ -339,7 +593,7 @@ if strcmp(typestr,'ORBW') & isfield(Expt.Trials,'se')
     BlockEnd = [Expt.Header.BlockStart(2:end)-1  Expt.Trials(end).Trial];
     
     for j = 1:length(Expt.Header.BlockStart)
-        id = find(abs([Expt.Trials.cv]) < 0.01 & ...
+        id = find(abs([Expt.Trials.psyv]) ==0 & ...
             ismember([Expt.Trials.RespDir],[-1 1])...
             & [Expt.Trials.Trial] >= Expt.Header.BlockStart(j) ...
             & [Expt.Trials.Trial] <= BlockEnd(j));
@@ -374,35 +628,121 @@ end
 for j = 1:length(type)
     if isfield(Expt.Trials,type{j})
     vals{j} = [Expt.Trials.(type{j})];
+    if length(vals{j}) > length(Expt.Trials) %mulitple values
+       x = cat(1,Expt.Trials.(type{j}));
+       vals{j} = x(:,columns(j))';
+    end
     uvals{j} = unique(vals{j});
     end
 end
 
+if isempty(vals{2})
+    uvals{2} = 0;
+    vals{2} = zeros(size(vals{1}));
+end
+for j = 1:length(uvals)
+    uvals{j} = uvals{j}(~isnan(uvals{j}));
+end
+
+if nargout > 2
+        for j = 1:length(Expt.Trials)
+            Expt.Trials(j).signal = abs(Expt.Trials(j).(sigvar)) .* Expt.Trials(j).rwdir;
+        end
+end
 
 if verbose
     fprintf('%d Expts...',length(type));
 end
-[counts, range] = hist(abs(vals{1}),unique(abs(vals{1})));
+magnitudes = unique(abs(vals{1}));
+if length(magnitudes) == 1
+end
+%[counts, range] = hist(abs(vals{1}),unique(abs(vals{1})));
+if strcmp(type{1},'Dc')
+    signs = vals{2};
+end
 if plotreward
     scores = [Expt.Trials.RespDir].* [Expt.Trials.rwdir];
     plot(scores,'o');
     hold on;
     plot([Expt.Trials.rw]./max([Expt.Trials.rw]*1.1),'ro-');
-    return;
-elseif pntrials(1) > 0
+    return
+elseif plotsequence
+    respdir = [Expt.Trials.RespDir];
+    signal = abs([Expt.Trials.(sigvar)]) .* [Expt.Trials.rwdir];
+    for j = 1:length(Expt.Trials)
+        if length(uvals{2}) > 1
+            sgn = sign(Expt.Trials(j).(type{2}) - mean(uvals{2}));
+        else
+            sgn = 1;
+        end
+        Expt.Trials(j).signal = signal(j);
+    end
+    signal = [Expt.Trials.signal];
+    signals = unique([Expt.Trials.signal]);
+    scores = [Expt.Trials.RespDir].* [Expt.Trials.rwdir];
+    rtype = 2.5 +[scores + respdir/2];
+    for j = 1:length(signals)
+    %wrong L, wrong R, correct L, correct R, 
+    rid = find(signal == signals(j) & respdir > 0);
+    lid = find(signal == signals(j) & respdir < 0);
+    rid = rid(rid > 1);
+    lid = lid(lid > 1);
+    if isempty(rid) || isempty(lid)
+        loseshift(j) = NaN;
+        winstay(j) = NaN;
+    else
+    nt(j) = length(rid)+length(lid);
+    k(:,1) = histc(rtype(rid-1),[1:4])./length(rid);
+    k(:,2) = histc(rtype(lid-1),[1:4])./length(lid);
+    nwrong(j) = sum(sum(k(1:2,:)));
+    ncorrect(j) = sum(sum(k(3:4,:)));
+    loseshift(j) = (k(1,1)+k(2,2)-k(1,2)-k(2,1))./nwrong(j);
+    winstay(j) = (k(3,1)+k(4,2)-k(3,2)-k(4,1))./ncorrect(j);
+    end
+    end
+    [a,zid] = min(abs(signals));
+    details.ntrials = nt;
+    details.signals = signals;
+    details.loseshift = cat(1,loseshift, nwrong);
+    details.winstay = cat(1,winstay, ncorrect);
+    F = gcf;
+    GetFigure(labelb);
+    hold off; 
+    plot(details.signals,loseshift,'o-');
+    hold on;
+    plot(details.signals,winstay,'ro-');
+    legend('Lose-Shift','Win-Stay');
+    title(sprintf('%d Trials. LoseShift %.1f/%.2f, Winstay %.1f/%.2f',nt(zid),loseshift(zid).*100,nwrong(zid)/2,winstay(zid).*100,ncorrect(zid)/2));
+    figure(F);
+elseif pntrials(1) > 0 && pntrials(1) < length(Expt.Trials)
     trials = [Expt.Trials.Trial];
     k = 1;
     step = pntrials(2);
     args = {};
     if nofit
-        args = {args{:} 'nofit'}
+        args = {args{:} 'nofit'};
     end
+    if strcmp(type{3},'Adapt')
+        args = {args{:} 'type3' type{3}};
+    end
+       
     pp= {};
     details = {};
     for j = 1:step:(length(trials)-pntrials(1))
-        [pp{k}, details{k}] = ExptPsych(Expt,'trials',[j:j+pntrials(1)-1],args{:});
+        if collapse(2) ==0 
+            [pp{k}, details{k}] = ExptPsych(Expt,'trials',[j:j+pntrials(1)-1],args{:},'type2',type{2},'collapse',collapse);
+        else
+            [pp{k}, details{k}] = ExptPsych(Expt,'trials',[j:j+pntrials(1)-1],args{:});
+        end
+        if isfield(details{k},'fit')
+            details{k}.fitvals = details{k}.fit.fit;
+        end
         lens(k) = length(pp{k});
-        tn(k) = j; 
+        if plotdate
+            tn(k) = details{k}.date;
+        else
+            tn(k) = j;
+        end
         k = k+1;
     end
     nex = length(lens);
@@ -419,20 +759,23 @@ elseif pntrials(1) > 0
     Y = ones(k+1,max(lens)+1) .* NaN;
     Z = ones(k+1,max(lens)+1) .* NaN;
     for j = 1:nex
+        [xs, xid] = sort([pp{j}.x]);
         for k = 1:lens(j)
-            X(j,k) = pp{j}(k).x;
+            X(j,k) = pp{j}(xid(k)).x;
             Y(j,k) = tn(j);
-            Z(j,k) = pp{j}(k).resp./pp{j}(k).n;
+            Z(j,k) = pp{j}(xid(k)).resp./pp{j}(xid(k)).n;
         end
-            X(j,k+1) = pp{j}(k).x + mean(diff([pp{j}.x]));
+            X(j,k+1) = pp{j}(xid(k)).x + mean(diff([pp{j}.x]));
             Y(j,k+1) = tn(j);
-            Z(j,k+1) = pp{j}(k).resp./pp{j}(k).n;
+            Z(j,k+1) = pp{j}(xid(k)).resp./pp{j}(xid(k)).n;
     end
     end
     f = gcf;
     GetFigure(ptag);
+    hold off; 
     pcolor(X',Y',Z');
     shading('flat');
+    set(gca,'color',[0.5 0.5 0.5]);
     colorbar;
     caxis([0 1]);
     colormap('hot');
@@ -440,9 +783,8 @@ elseif pntrials(1) > 0
     return;
 elseif smoothw
    hold off;
-   colors = mycolors;
-    if strcmp(type{1},'cv')
-        signs = vals{2} - mean(uvals{2});
+
+    if sum(strcmp(type{1},{'cv' 'Dc'}))
         signvals{1} = vals{1} .* sign(signs);
     else 
         signvals{1} = vals{1};
@@ -499,7 +841,13 @@ elseif smoothw
    return;
 end
 
-signs = sign(uvals{2} - mean(uvals{2}));
+%if >2 expt, might be some random values, might be two expts combined.
+%best guess for crit is mean of all actual trial values
+if length(uvals{2}) > 2
+    signs = sign(uvals{2} - mean(vals{2}));
+else
+    signs = sign(uvals{2} - mean(uvals{2}));
+end
 labels = {};
 np = 1;
 for j = 1:length(uvals{1})
@@ -544,21 +892,22 @@ for j = 1:length(uvals{1})
                 pp(np).expno = 1;
                 labels{4} = 'IDx';                
             elseif uvals{2}(k) > 0
-                pp(np).expno = 2;
+                pp(np).expno = 2+(m)*length(uvals{3});
                 pp(np+1) = pp(np);
                 np = np+1;
                 pp(np).expno = 1;
                 labels{2} = 'ID+';
             else
-                pp(np).expno = 3;
+                pp(np).expno = 3+(m)*length(uvals{3});
                 pp(np+1) = pp(np);
                 np = np+1;
                 pp(np).expno = 1;
                 labels{3} = 'ID-';
             end
-        elseif strcmp(type{2},'ori')
+        elseif sum(strcmp(type{2},{'ori' 'dx'}))
             pp(np).x = uvals{1}(j) .* signs(k);
             pp(np).expno = m;            
+            collapse(2) = 1; %pp.x now has metameter. Can ignore pp.y, so that if DC=0 or ob=inf collapse
         else
 % don't need signs for most expts. Only if expt 1 is Dc/ob
            if strcmp(type{1},'cv')
@@ -569,14 +918,16 @@ for j = 1:length(uvals{1})
            end
             if collapse(2)
                 pp(np).expno = m;
-            else
+            elseif collapse(3)
                 pp(np).expno = k;
                 if strcmp(typestr,'ORBW') & uvals{2}(k) >= 30
                     pp(np).expno = find(uvals{2} == uvals{2}(k)-90);
                 end
+            else
+                pp(np).expno = m + (k-1) * length(uvals{3});
             end
         end
-        if length(uvals(3)) > 1
+        if length(uvals{3}) > 1 && (collapse(2) || length(uvals{2}) < 2)
             pp(np).expno = m;
         end
         np = np+1;
@@ -584,7 +935,7 @@ for j = 1:length(uvals{1})
     end
 end
 
-if type{1} == 'cv'
+if strcmp(type{1}, 'cv')
     id = find(abs([pp.x]) < 0.01);
     if length(id) > 1
         pp(id(1)).n = sum([pp(id).n]);
@@ -608,15 +959,33 @@ end
 if verbose
     fprintf('%d conditions',length(pp));
 end
-for j = unique([pp.expno])
-    for k = 1:length(uvals{1})
-    id = find([pp.x] == uvals{1}(k) & [pp.expno] == j);
-    if length(id) > 1
-    pp(id(1)).n = sum([pp(id).n]);
-    pp(id(1)).resp = sum([pp(id).resp]);
-    uid = setdiff(1:length(pp),id(2:end));
-    pp = pp(uid);
+
+%Pool coniditions that are the same.
+if collapse(2) || length(uvals{2}) < 2
+    for j = unique([pp.expno])
+        for k = 1:length(uvals{1})
+            id = find([pp.x] == uvals{1}(k) & [pp.expno] == j);
+            if length(id) > 1
+                pp(id(1)).n = sum([pp(id).n]);
+                pp(id(1)).resp = sum([pp(id).resp]);
+                uid = setdiff(1:length(pp),id(2:end));
+                pp = pp(uid);
+            end
+        end
     end
+else
+    for j = unique([pp.expno])
+        for k = 1:length(uvals{1})
+            for m = 1:length(uvals{2})
+                id = find([pp.x] == uvals{1}(k) & [pp.expno] == j & [pp.y] == uvals{2}(m));
+                if length(id) > 1
+                    pp(id(1)).n = sum([pp(id).n]);
+                    pp(id(1)).resp = sum([pp(id).resp]);
+                    uid = setdiff(1:length(pp),id(2:end));
+                    pp = pp(uid);
+                end
+            end
+        end
     end
 end
 
@@ -630,10 +999,12 @@ if length(predchoices)
         ppp(j).resp = sum(predchoices(tids{j}) == -1);
     end
 end
-if length(uvals{3}) > 1 && ~strcmp(type{3},'tr')
-fit = fitpsf(pp,'twomeans');
+if length(uvals{3}) > 1 && sum(strcmp(type{3},{'tr' 'nf' 'dd' 'zf'})) == 0
+    pp = pp([pp.n] >= minreps);
+fit = fitpsf(pp,'twomeans',psfargs{:});
+
 if showplot
-    ph = fitpsf(fit.data,'twomeans', fit,psfargs{:},'coff',coloroff,'showfit');
+    ph = fitpsf(fit,'twomeans', fit, 'coff',coloroff,'showfit',psfargs{:});
     if verbose
         fprintf('Fit ');
     end
@@ -646,17 +1017,22 @@ if showplot
         labels{2} = sprintf('%s=%.2f',type{3},uvals{3}(2));
     end
     set(gca,'Ylim',[0 1]);
+    if fit.options.fixsd
+        title(sprintf('Bias %.4f,%.4f (=%.4fp < %.3f), (Fixed)Slope %.4f',fit.fit(1),fit.fit(2),fit.fit(1)-fit.fit(2),fit.pval,abs(fit.options.fixsd)));
+    else
     title(sprintf('Bias %.4f,%.4f (=%.4fp < %.3f), Slope %.4f',fit.fit(1),fit.fit(3),fit.fit(1)-fit.fit(3),fit.pval,abs(fit.fit(2))));
+    end
     xlabel(type{1});
     text(min([pp.x]),-0.1,0,sprintf('%s %.1f',type{2},uvals{2}(1)));
     text(max([pp.x]),-0.1,0,sprintf('%s %.1f',type{2},uvals{2}(end)),...
         'HorizontalAlignment','right');
 end
 else
+    pp = pp([pp.n] >= minreps);
     yv = unique([pp.expno]);
 
-    cols = mycolors;
     for j = 1:length(yv)
+        icolor = j+coloroff;
         id = find([pp.expno] == yv(j) & [pp.n] >= minreps);
         fits{j} = fitpsf(pp,'expno',yv(j),psfargs{:});
         if showplot & isfield(fits{j},'data')
@@ -667,12 +1043,18 @@ else
             Expt.Stimvals.bias = fit.fit(1);
 %            plot([pp(id).x],[pp(id).resp]./[pp(id).n],'o');
             if length(id) > 1
-                ph = fitpsf(fit.data,'showfit',fit,psfargs{:},'color',cols{j+coloroff});
+                ph = fitpsf(fit.data,'showfit',fit,psfargs{:},'color',colors{j+coloroff});
                 fit.fith = ph.fith;
                 h(j) = ph.fith;
                 if j > length(labels)
-                    if length(uvals{3}) > 1
+                    if length(legendlabels) >= j
+                        labels{j} = legendlabels{j};
+                    elseif length(uvals{3}) > 1
+                        if length(uvals{2}) > 1
+                            labels{j} = sprintf('%s=%.3f %s=%.3f',type{3},unique([pp(id).z]),type{2},unique([pp(id).y]));
+                        else
                         labels{j} = [sprintf('%s=',type{3}) sprintf('%.3f ',unique([pp(id).z]))];
+                        end
                     else
                         labels{j} = [sprintf('%s=',type{2}) sprintf('%.3f ',unique([pp(id).y]))];
                     end
@@ -685,7 +1067,7 @@ else
                     
                 end
             else
-                h(j) = plot([pp(id).x],[pp(id).resp]./[pp(id).n],'o','color',cols{j+coloroff});
+                h(j) = plot([pp(id).x],[pp(id).resp]./[pp(id).n],'s','color',colors{j+coloroff});
                 if shown
                     text([pp(id).x],[pp(id).resp]./[pp(id).n],num2str(pp(id).n));
                 end
@@ -728,16 +1110,21 @@ else
             end
 
             if showplot
-                pfits{j} = fitpsf(ppp,'showfit','expno',yv(j),psfargs{:},'color',cols{j+coloroff+1});
+                pfits{j} = fitpsf(ppp,'showfit','expno',yv(j),psfargs{:},'color',colors{j+coloroff+1});
             else
                 pfits{j} = fitpsf(ppp,'showfit','expno',yv(j),psfargs{:});
             end
             details.predfit.fits = pfits;
         end
         elseif length(id) == 1
-            plot(pp(id).x,pp(id).resp./pp(id).n,'o','color',cols{j+coloroff});
+            if length(uvals{3}) > 1
+                icolor = find([pp(id).z] == uvals{3}) + coloroff;
+            else
+                icolor = j+coloroff;
+            end
+            plot(pp(id).x,pp(id).resp./pp(id).n,'s','color',colors{icolor});
             hold on;
-            text(pp(id).x,pp(id).resp./pp(id).n,sprintf('%s=%.2f n= %d',type{2},pp(id).y,pp(id).n));
+            l = text(pp(id).x,pp(id).resp./pp(id).n,sprintf('%s=%.2f n= %d',type{2},pp(id).y,pp(id).n));
         end
 
     end
@@ -745,6 +1132,9 @@ end
     if verbose
     fprintf('%d Expts',length(yv));
     end
+if exist('fits','var')
+details.fits = fits;
+end
 if exist('fit','var')
 details.fit = fit;
 details.handles = h;
@@ -754,7 +1144,11 @@ minn = median([pp(id).n]) * 0.8;
 id = find([pp.n] > minn);
 perf = [pp(id).resp]./[pp(id).n];
 details.maxperf = mean([1-min(perf) max(perf)]);
+
 if ~exist('ph','var')
+    if holdstate == 0
+        hold off;
+    end
     return;
 end
 if showplot && length(id)
@@ -767,8 +1161,15 @@ if isfield(Expt.Trials,'rw')
 details.rws = b;
 details.rwn = a;
 end
+if strcmp(type{3},'nf') && length(h) == length(uvals{3}) && length(h) > 1
+    labels = {};
+    for j = 1:length(h)
+        labels{j} = sprintf('%s=%.1f',type{3},uvals{3}(j)); 
+    end
+end
+
 if length(labels) == length(h);
-    id = find(h > 0 & ishandle(h));
+    id = find(double(h) > 0 & ishandle(h));
     if details.fit.fit(2) < 0
         legend(h(id),labels{id});
     else
@@ -800,11 +1201,18 @@ if strcmp(Expt.Stimvals.e3,'Us') && Expt.Header.rc
     legend('Stim','non','diff');
 elseif Expt.Header.rc
     [K,b] = ExptPRC(Expt, 0, []);
-    GetFigure('PK');
-    hold off;
-    id= find(b.rcvals >=0);
-    plot(b.rcvals(id),K(id))
+    if ~isempty(b)
+        GetFigure('PK');
+        hold off;
+        id= find(b.rcvals >=0);
+        plot(b.rcvals(id),K(id));
+    end
 end    
+
+if holdstate == 0
+    hold off;
+end
+
 
 
 function [consistency, ses, srpts] = CalcConsistency(Trials)
@@ -833,6 +1241,9 @@ details = [];
 if isempty(id)
     id = 1:length(Expt.Trials);
 end
+if ~isfield(Expt.Trials,'or')
+    return;
+end
 for j = 1:length(id)
     lens(j) = length(Expt.Trials(id(j)).or);
 end
@@ -842,9 +1253,13 @@ for j = sid;
     Expt.Trials(id(j)).or(lens(j)+1:len) = NaN;
 end
 
-R.dcs = [Expt.Trials(id).Dc];
 signs = sign([Expt.Trials(id).ori] - mean([Expt.Trials(id).ori]));
+if isfield(Expt.Trials,'Dc')
+R.dcs = [Expt.Trials(id).Dc];
 R.dcs = R.dcs .*signs;
+else
+    R.dcs = zeros(size(Expt.Trials));
+end
 signals = union(signals,signals * -1); %need to do + and - signals separaely
 R.resp = [Expt.Trials(id).RespDir];
 R.seq = [Expt.Trials(id).or]';

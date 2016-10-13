@@ -16,7 +16,7 @@ stim = 0;
 showim = 0;
 slope = 0.0; % set this to plot a line on top of responses to look at the orientation of the ridge.
 dp = 0;
-        
+    qianmode = 0;    
 colors = mycolors;
 % Number of sets of images to generate
 nimages = 3;
@@ -29,6 +29,7 @@ sffilter = 0;
 showfilter = 0;
 jf = 4; %default harmonic
 jsf = 4;
+freq = [4 6]/n;
 j = 1;
 while j < nargin
     if strncmpi(varargin{j},'image',4)
@@ -49,6 +50,8 @@ while j < nargin
         normalize = 1;
     elseif strncmpi(varargin{j},'poso',4)
         posonly = 1;
+    elseif strncmpi(varargin{j},'qian',4)
+        qianmode = 1;
     elseif strncmpi(varargin{j},'sf',2) %stimulus SF for Gabor, as harmonic
         j = j+1;
         jsf = varargin{j};
@@ -62,7 +65,6 @@ while j < nargin
     j = j+1;
 end
 % Simple cell frequencies:
-freq = [4 6]/n;
 nbw=1.5;
 orbw=pi/5;
 sf = freq(1);
@@ -120,7 +122,11 @@ for k = seedid:seedid
         imr = cos(2 * pi * sf.*x + dp) .* exp(-((x-n/2).^2/(2 * sd^2) + (y-n/2).^2/(2 * sd^2)));
 
     else
-        rand('seed',randomseeds(k));
+        if k > length(randomseeds)
+            rand('seed',k);
+        else
+            rand('seed',randomseeds(k));
+        end
         im = ((rand(n)>0.5)-0.5)*2; % binary random-dot pattern with no DC
         imr = im;
     end
@@ -151,7 +157,7 @@ else
     midrow = 36;
 end
 for phase = phases .* pi/180;
-Gabora = exp(-x2d.^2./2./sx^2) .* exp(-y2d.^2./2./sy^2) ...
+    Gabora = exp(-x2d.^2./2./sx^2) .* exp(-y2d.^2./2./sy^2) ...
         .* cos( phase+2*pi.*x2d.*freq(jf));   
     OddGabora = exp(-x2d.^2./2./sx^2) .* exp(-y2d.^2./2./sy^2) ...
         .* sin( phase + 2*pi.*x2d.*freq(jf));   
@@ -160,12 +166,14 @@ Gabora = exp(-x2d.^2./2./sx^2) .* exp(-y2d.^2./2./sy^2) ...
     aimage = real(ifft2(FTr.*FTGabora));
     oaimage = real(ifft2(FTr.*FTOddGabora));
 % this way does not keep constant cyclopean location
+if qianmode
     a = (image(row,col) .* aimage(row,:));
     b = oimage(row,col) .* oaimage(row,:);
 % this way does.
+else
     a = (image(row,:) .* fliplr(aimage(row,:)));
     b = oimage(row,:) .* fliplr(oaimage(row,:));
-        
+end    
 if normalize
 %im(rwo,col) is one eyes pixel;
 %im(row,:) is the row of pixels in the other eye.so this gives a vector of

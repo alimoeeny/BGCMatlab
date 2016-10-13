@@ -164,7 +164,7 @@ while(j < nargin - 1)
 end
 
 funcalled = 0;
-argon = {'sdfw' OTTF.plot.sdfw};
+argon = {'sdfw' OTTF.plot.sdfw, 'rcnmin', 10};
 if get(findobj('Tag','LFP'),'value')
        argon = {argon{:} {'lfp'}};
 end
@@ -219,7 +219,12 @@ end
    end
    
    GetFigure(OTTF.tag.fig);
-   res = PlotExpt(OTTF.fstrings{id},'fbox',argon{:});
+   hold off; 
+   colors = mycolors;
+   res = PlotExpt(OTTF.fstrings{id(1)},'fbox',argon{:});
+   for j = 2:length(id)
+       res = PlotExpt(OTTF.fstrings{id(j)},'fbox',argon{:},'hold','forcecolor',colors{j});
+   end
    OTTF.Expt = res(1).Data;
    tstr = get(get(gca,'title'),'string');
    f = fields(OTTF.show);
@@ -278,6 +283,7 @@ OTTF.listids = 1:length(OTTF.fstrings);
        'NumberTitle', 'off', 'Tag',OTTF.tag.top,'Name',sprintf('OTTF %s (%d)',OTTF.path,length(OTTF.fstrings)));
   lst = uicontrol(gcf, 'Style','listbox','String',OTTF.fstrings,...
 		'Callback', ' PlotExpts(''setentry'')','Tag',OTTF.listtag,...
+        'Max',3,'Min',1,...
 		'Position',[10 10 wsiz(1)-20 cw*listlen]);
   OTTF.toplevel = gcf;
 

@@ -72,6 +72,10 @@ sptrig = [];
 plotargs = {};
 csdsk = [2 2]; %smoothing kernel for CSD
 interpolate = 0;
+sumx = 0;
+zoomstart = [];
+
+
 j = 1;
 while j <= length(varargin)
     if strncmpi(varargin{j},'movie',4)
@@ -137,6 +141,13 @@ while j <= length(varargin)
         plottype = LFPBANDPWR;
     elseif strncmpi(varargin{j},'LFPtrial',5)
         plottype = LFPTRIAL;
+        if strncmpi(varargin{j},'LFPtrialstart',11)
+            zoomstart = 1;
+            if length(varargin) > j && isnumeric(varargin{j+1})
+                j = j+1;
+                zoomstart = varargin{j};
+            end
+        end
     elseif strncmpi(varargin{j},'Lineplot',5)
         lineplot = 1;
     elseif strncmpi(varargin{j},'muvar',5)
@@ -194,6 +205,8 @@ while j <= length(varargin)
         argon = {argon{:} varargin{j}};
     elseif strncmpi(varargin{j},'sumy',4)
         sumy = 1;
+    elseif strncmpi(varargin{j},'sumx',4)
+        sumx = 1;
     elseif strncmpi(varargin{j},'diffy',5)
         sumy = 2;
     elseif strncmpi(varargin{j},'timerange',6)
@@ -230,6 +243,12 @@ if isstruct(name)
     rc = name;
 % if there is an 'lfp' matrix, uset that. Otherwise, if this is an rc file
 % (output from PlotRevCOrAny, build the matrix
+  if ~isfield(rc.Header,'exptype') & isfield(rc.Header,'expname')
+      if strfind(rc.Header.expname,'OpRC')
+          rc.Header.exptype = 'OPRC';
+      end
+  end
+      
 if sum(yvals) == 0
     if isfield(rc,'tresps')
         yvals = 1:size(rc.tresps,3);
@@ -267,7 +286,7 @@ end
         if isfield(rc,'lfp')
             rc.tid = find(rc.lfptimes > timerange(1) & rc.lfptimes < timerange(2));
             [rc.eigs, rc.eigresp, rc.eigblank,x] = PlotLFPEig(rc,NaN, sumy, setlfpsign);
-        [a,b] = NetSpkPref(rc.eigresp,rc.x(:,1),'zerobase');
+        [a,b] = NetSpkPref(rc.eigresp,rc.x,'zerobase');
         lfppref = angle(b.vsum);
         rc.lfpprefs = x.prefs;
         rc.lfpprefdir = lfppref;
@@ -378,7 +397,8 @@ end
         set(0,'CurrentFigure',ofig);
     end
         
-        
+    mtimes = timerange(1):10:timerange(2);
+    
     if isfield(rc,'tresps')
         if ndims(rc.tresps) == 3
             rc.spkresps = rc.tresps
@@ -455,9 +475,10 @@ end
             rc.csdk = csdsk;
             if ismember(plottype,[PLOTLFPEIG RESPXBLANK PLOTLFPEIGVECTORS])
                 [rc.eigs, rc.eigresp, rc.eigblank,x] = PlotLFPEig(rc,lineplot, sumy, setlfpsign);
-                [a,b] = NetSpkPref(rc.eigresp, rc.x(:,1),'zerobase');
+                [a,b] = NetSpkPref(rc.eigresp, rc.x,'zerobase');
                 rc.lfpprefs = x.prefs;
                 rc.lfpprefdir = angle(b.vsum);
+                [c,d] = NetSpkPref(x.bresps, rc.x,'zerobase');
                 if plottype == RESPXBLANK
                     subplot(1,1,1);
                     imagesc(x.blankresp');
@@ -473,11 +494,20 @@ end
                 else
                 if lineplot == 3
                 subplot(3,1,2);
-                plot(rc.lfpprefdir.*180,probes(2:end-1),'b:');
+                plot(rc.lfpprefdir.*180/pi,probes(2:end-1),'b:');
                 elseif lineplot == 0
                     if strcmp(rc.Stimvals.et,'or')
+                        subplot(3,1,1);
+                        imagesc(rc.x(:,1),1:size(rc.lfp,4),cat(1, squeeze(sum(rc.eigresp,2)), rc.eigblank(1,:))');
+                        text(rc.x(end,1),0,'blank');
+                        subplot(3,1,3);
+                        imagesc(rc.x(:,1),1:size(rc.lfp,4),cat(1, squeeze(sum(x.bresps,2)), rc.eigblank(2,:))');
                         subplot(3,1,2);
-                        plot(rc.lfpprefdir(probes).*180,probes,'b:');
+                        hold off;
+                        plot(rc.lfpprefdir(probes).*180/pi,probes,'b:');
+                        hold on;
+                        plot(angle(d.vsum).*180/pi,probes,'r:');
+                    else
                     end
                 end
                 end
@@ -583,8 +613,35 @@ end
                     lfp = lfp + squeeze(rc.lfp(:,j,k,:)) * rc.lfpn(j,k);
                 end
                 end
+                lfp = lfp./sum(rc.lfpn(:));
                 hold off;
-                imagesc(lfp);
+                if length(zoomstart)
+                    if isfield(rc.Header,'probesep')
+                        ytext = 'Depth (uM)'
+                        ys = probes .* rc.Header.probesep;
+                    else
+                        ytext = 'Probe';
+                        ys = probes
+                    end
+                    tidx = find(rc.lfptimes < 250);
+                    for j = probes
+                        lfp(:,j) = lfp(:,j) - mean(lfp(tidx,j));
+                    end
+                    if lineplot
+                        plot(rc.lfptimes./10,lfp(:,probes));
+                    else
+                    imagesc(rc.lfptimes./10,ys,lfp(:,probes)');
+                    ylabel(ytext);
+                    end
+                    xlabel('Time (ms)');
+                    if length(zoomstart) == 2
+                        set(gca,'xlim',zoomstart);
+                    else
+                        set(gca,'xlim',[0 200]);
+                    end
+                else
+                    imagesc(probes, rc.lfptimes./10,lfp);
+                end
             elseif ismember(plottype, [LFPPWRDIFF LFPSIGPWR]) %power spec for pref vs null choices
                 % sigpwr is power diff by stim summed over freqs, for each probe
                 % upstim (lower value) is first
@@ -1159,6 +1216,8 @@ end
         end
     elseif ismember(plottype,[PLOTONESTIM, CSDSUM])
         nplots = 1;
+        fillplot = 0;
+        showtitle = 0;
         if isfield(rc,'tresps');
             if sum(xvals) == 0
                 xvals = 1:size(rc.tresps,2);
@@ -1182,12 +1241,23 @@ end
         end
         ny = length(yvals);
         allr = rc.lfp(tid,:,:,:);
-        cr = [min(allr(:)) max(allr(:))];
+        if sumx == 1
+            nx = 1;
+            allr = sum(rc.lfp(tid,xvals,yvals,:),2);
+            xvals = 1;
+        end
         if sumy == 1
             ny = 1;
             allr = sum(rc.lfp(tid,:,yvals,:),3);
             yvals = 1;
         end
+        if nx > 8 || ny > 8
+            fillplot = 1;
+            showtitle = 0;
+        elseif nx > 8
+            showtitle = 0;
+        end
+        cr = [min(allr(:)) max(allr(:))];
         if sumy == 2 & size(rc.lfp,3) > 1
             ny = 2;
             allr(:,:,1,:) = sum(rc.lfp(tid,:,yvals,:),3)./2;
@@ -1199,11 +1269,33 @@ end
             yvals = [yvals(1) yvals(2)];
             end
         end
+        pw = 1./ny;
+        ph =1./nx;
+        hstep = 0.0;
+        vstep = 0.0;
+
         for k = 1:ny
             for j = 1:length(xvals)
                 latency = LFPLatency(squeeze(rc.lfp(:,xvals(j),yvals(k),probes)),rc.lfptimes);
                 rc.lfplatencies(j,k,:) = latency(:,3);
-                subplot(nx+xo,ny,(j+xo) * ny + k-ny);
+                if sumx
+                    if fillplot
+                    ph =1./ny;
+                    x = 0.01; pw = 0.98;
+                    y = vstep + (k-1).*(ph+vstep);
+                    subplot('Position' ,[x y pw ph]);
+                    else
+                    subplot(ny+xo,nx,(j+xo) * nx + k-nx);
+                    end
+                else
+                    if fillplot
+                    x = hstep + floor((k-1)) .* (pw+hstep);
+                    y = vstep + (j-1).*(ph+vstep);
+                    subplot('Position' ,[x y pw ph]);
+                    else
+                    subplot(nx+xo,ny,(j+xo) * ny + k-ny);
+                    end
+                end
                 rc.lfpim.z = squeeze(allr(:,xvals(j),yvals(k),probes))';
                 if lineplot == 3
                     csd = CalcCSD(rc.lfpim.z,'smooth',csdsk);
@@ -1225,15 +1317,22 @@ end
                 if diff(size(rc.x)) > 0
                     rc.x = rc.x';
                 end
-                if isfield(rc,'Stimvals')
+                if isfield(rc,'Stimvals') & showtitle
                 title(sprintf('%s=%.2f,%s=%.2f N%d',rc.Stimvals.xtype,rc.x(xvals(j),1),rc.Stimvals.ytype,rc.y(yvals(k)),rc.lfpn(xvals(j),yvals(k))))
+                elseif fillplot
+                    yl = get(gca,'ylim');
+                    str = sprintf('%s=%.2f(%d)',rc.Stimvals.xtype,rc.x(xvals(j),1),rc.lfpn(xvals(j)));
+                    text(mean(rc.lfptimes(tid)./10),yl(1)+diff(yl)/10,str);
                 end
                 if j < length(xvals)
                 set(gca,'xticklabel',[]);
                 end
-                if k == 1
+                if fillplot
+                    set(gca,'xticklabel',[],'yticklabel',[]);
+                elseif j == 1
                     xlabel('Time (ms)');
                 end
+                
             end
         end
         if showblank
@@ -1387,12 +1486,12 @@ end
     end
     result = rc;
     return;
-elseif isdir(name)
+elseif ischar(name) && isdir(name)
     result = ProcessDir(name, saveresult, argon{:});
     return;
 end
 
-if isempty(isrc)
+if isempty(isrc) && ischar(name)
 if strfind(name,'RC')
     isrc = 1;
 else
@@ -1439,7 +1538,7 @@ for j = probes;
         [ed, eds] = GetEval(Expt,'ed');
         if isrc | Expt.Header.rc == 1
             [res, bExpt] = PlotRevCorAny(Expt,'sdfw',166,'box',rcargs{:});
-            result.types = res.types;
+            result.type = res.type;
             if isfield(res,'sdfs')
                 if ~isnan(res.bestdelay)
                     ts = res.bestdelay;
@@ -1492,7 +1591,7 @@ for j = probes;
                     end
                     result.cp(j) = res.cp;
                 end
-                if strmatch(res.types{1},{'Op' 'Pp'})
+                if strmatch(res.type{1},{'Op' 'Pp'})
                     result.fit{j} = FitExpt(res,'plotfit');
                 end
 
@@ -1554,7 +1653,7 @@ for j = probes;
                 if strmatch(res.type,{'Op' 'Pp'})
                     result.fit{j} = FitExpt(res);
                 end
-                result.types = res.type; 
+                result.type = res.type; 
             end
         end
     for k = 1:length(Expt.Header.Clusters)
@@ -1565,13 +1664,13 @@ for j = probes;
             Clusters{k}{j} = Expt.Header.Clusters{k}{j};
         end
     end
-    end
     result.isrc = isrc;
 
     result.Cluster(j).autocut = [C.autocut];
     result.Cluster(j).dprime = [C.dprime];
     if isfield(Expt.Header,'SpkStats')
         result.Cluster(j).SpkStats = Expt.Header.SpkStats;
+    end
     end
 end
 
@@ -1629,6 +1728,12 @@ if exist(clst,'file')
         cid = find(probe(trials) > 0 & quality(trials) > isolation);
         cExpt.Trials = cExpt.Trials(cid);
         cExpt.probes = probe(trials(cid));
+        cl = unique(cluster(trials(cid)));
+        if length(cl) == 1
+            cExpt.Header.Clusterid = cl;
+        else
+            cExpt.Header.Clusterid = cluster(trials(cid));
+        end
         bk = Expt.Header.BlockStart;
         bk = [bk Expt.Trials(end).Trial+1];
         for b = 1:length(bk)-1
@@ -1653,6 +1758,8 @@ if exist(clst,'file')
         muid = find(probe(trials) > 0 & quality(trials) <= isolation);
         muExpt.Trials = muExpt.Trials(find(probe(trials) > 0 & quality(trials) <= isolation));
         muExpt.probes = probe(trials(find(probe(trials) > 0 & quality(trials) <= isolation)));
+        muExpt.Header.probe = median(probe(trials(muid)));
+        muExpt.Header.cellnumber = j;
         if isrc
             if length(cExpt.Trials)
             [res, bExpt] = PlotRevCorAny(cExpt,'sdfw',166,'box',rcargs{:});
@@ -1675,7 +1782,7 @@ if exist(clst,'file')
                     res.cp.prefbycount = mean(bres.y(:,end));
                 end
             end
-            if strmatch(res.types{1},{'Op' 'Pp'})
+            if strmatch(res.type{1},{'Op' 'Pp'})
                 res.fit = FitExpt(res);
             end
             end
@@ -1702,13 +1809,13 @@ if exist(clst,'file')
                         T.lfptrig = avg;
                         T.triglfpnspk = [a.nspk];
                         T.triglfptimes = a(1).times./10;
+                        T.probe = mean(cExpt.probes);
+                        T.probes = cExpt.probes;
+                        if strmatch(res.type{1},{'Op' 'Pp'})
+                            res.fit = FitExpt(res);
+                            T.type = res.type;
+                        end
                     end
-                    T.probe = mean(cExpt.probes);
-                    T.probes = cExpt.probes;
-                end
-                if strmatch(res.type{1},{'Op' 'Pp'})
-                    res.fit = FitExpt(res);
-                    T.types = res.type;
                 end
                 res = rmfield(res,'Data');
             end
@@ -1778,7 +1885,6 @@ if isrc
     result.netspksd = x.netsd;
 end
 id = find(ismember([Expt.Trials.Trial],[Expt.Header.BlockStart]));
-
 for j = 1:length(id)
     result.Header.BlockStart(j) = Expt.Trials(id(j)).Start(1);
     result.Header.BlockTrial(j) = Expt.Trials(id(j)).Trial;
@@ -1816,11 +1922,18 @@ if ~exist('LFP','var') & exist(ename,'file')
     load(ename);
 end
 if exist('LFP','var')
+    lfp = cat(1,LFP.Trials.LFP);
+    result.Header.lfpsd = std(lfp);
+    result.Header.lfpmean = mean(lfp);
+    clear lfp;
     rescale = find(scales ~=1);
     if isrc
         LFP = CheckLFP(LFP,'fix');
         [rc, blfp] = PlotRevCorAny(LFP,'lfp', rcargs{:});
         [result.lfp, mresp, result.lfpblank, a] = CombineRCLFP(rc, scales);
+        if isfield(rc,'subres')
+            [result.subres{1}.lfp, b, result.subres{1}.lpbblank] =  CombineRCLFP(rc.subres{1}, scales);
+        end
         if isfield(rc.sdfs,'triallfp')
             result.lfptrial = rc.sdfs.triallfp;
         end
@@ -2195,6 +2308,14 @@ while j <= length(varargin)
     j = j+1;
 end
 
+if size(xv,2) > size(xv,1)
+    xv = xv(1,:);
+    xdim = 2;
+else
+    xv = xv(:,1);
+    xdim = 1;
+end
+    
 if noneg
     for j = 1:size(netspk,3)
         netspk(:,:,j) = netspk(:,:,j) - min(min(netspk(:,:,j)));
@@ -2204,8 +2325,12 @@ x.netspk = netspk;
 sumy = squeeze(mean(x.netspk,2));
         [x.maxr, prefs] = max(sumy);
         x.netsd = std(sumy);
-        oris = 2 * xv(:,1) .* pi/180; % double angles for CV
+        oris = 2 * xv .* pi/180; % double angles for CV
+        if xdim == 1
         oris = repmat(oris,1,size(sumy,2));
+        else
+        oris = repmat(oris,size(sumy,2),1)';
+        end
         x.vsum = (sum(sumy .* cos(oris)) + i * sum(sumy .* sin(oris)))./sum(abs(sumy));
         x.vsum = abs(x.vsum) .* (cos(angle(x.vsum)/2) + i * sin(angle(x.vsum)/2));
         
@@ -2221,7 +2346,16 @@ for j = 1:size(rc.sdfs.lfp,1)
     details.x(j) = rc.sdfs.x(j,1);
 end
 
+sumresp = zeros(size(sdfs,1),size(sdfs,4));
+for j = 1:size(rc.sdfs.lfp,1)
+    for k = 1:size(rc.sdfs.lfp,2)
+        sumresp = sumresp + squeeze(sdfs(:,j,k,:)) .* rc.sdfs.n(j,k);
+    end
+end
+
 mresp = squeeze(mean(sdfs,2));
+ny = size(mresp,2);
+mresp = repmat(mean(mresp,2),1,ny);
 nsdf = prod(size(rc.sdfs.lfp));
 
 blanks = [];
@@ -2598,7 +2732,7 @@ else
 end
 end
 
-function [eigs, resps, blr, details] = PlotLFPEig(rc,lineplot, sumy, setsign)
+function [eigs, resps, blr, details] = PlotLFPEig(rc,lineplot, sumy, setsign,varargin)
 
 plottype = 0;
 eigs = [];
@@ -2607,8 +2741,19 @@ blr = [];
 usey = 0;
 details = [];
 mkfit = 1;
+showeig = 0;
+j = 1; 
+while j <= length(varargin)
+if strncmpi(varargin{j},'showeig',7)
+    showeig = 1;
+end
+j = j+1;
+end
 
 if size(rc.lfp,3) == 2 && strcmp(rc.Stimvals.ytype,'ce')
+    usey = 1;
+end
+if size(rc.lfp,3) > 2 && strcmp(rc.Stimvals.ytype,'Or')
     usey = 1;
 end
 tid = rc.tid;
@@ -2700,6 +2845,9 @@ if setsign == 3 % sign set by similarity of tuning curve to blankresp tuning cur
     resps(:,:,id) = resps(:,:,id) * -1;
 end
 
+labels{2} = 'PC2';
+labels{1} = 'PC1';
+
 if size(resps,2) == 4
     if sumy > 0 & lineplot == 2 %show scatterplot of eigs
         aresp = squeeze(sum(resps,2))';
@@ -2722,7 +2870,7 @@ elseif size(resps,2) == 2
     bresp = squeeze(resps(:,2,:))';
     arange = [min([aresp(:); bresp(:)]) max([aresp(:); bresp(:)])];
     brange = arange;
-    if strmatch(rc.Header.exptype,'OPRC') & mkfit
+    if exist('xresps') & strmatch(rc.Header.exptype,'OPRC') & mkfit
         for j = 1:size(aresp,1)
         x = [rc.x(:,1)' Inf];
         y = [aresp(j,:) xresps(j)];
@@ -2733,15 +2881,26 @@ elseif size(resps,2) == 2
         details.fitratios = [wfits.amp]./[bfits.amp];
         details.bwvar = std(aresp')./std(bresp');
     end
-    aresp = squeeze(sum(resps(:,1,:),2))';
-    bresp = eigs';
-    arange = [min(aresp(:)) max(aresp(:))];
-    brange = [min(bresp(:)) max(bresp(:))];
+    if showeig
+        aresp = squeeze(sum(resps(:,1,:),2))';
+        bresp = eigs';
+        labels{1} = 'PC, summed over Y';
+        labels{2} = '1st Eigenvector';
+        arange = [min(aresp(:)) max(aresp(:))];
+        brange = [min(bresp(:)) max(bresp(:))];
+    else
+        labels{1} = 'PC Y = 1';
+        labels{2} = 'PC Y = 2';
+        arange = [min([min(aresp(:)) min(bresp(:))]) max([max(aresp(:)) max(bresp(:))])];
+        brange = arange;
+    end
 elseif size(resps,2) == 1 
     aresp = squeeze(mean(resps(:,:,:),2))';
     bresp = squeeze(mean(bresps(:,:,:),2))';
     arange = [min(aresp(:)) max(aresp(:))];
     brange = [min(bresp(:)) max(bresp(:))];
+elseif size(resps,2) > 4  %%2-D X/Y resps
+    
 end
 [maxr, prefs] = max(squeeze(sum(resps,2)));
 details.prefs = prefs;
@@ -2749,15 +2908,20 @@ details.beigs = beigs;
 details.ceigs = ceigs;
 details.bresps = bresps;
 details.cresps = cresps;
-if lineplot == 1
-subplot(2,1,1);
-plot(rc.x(:,1),aresp);
-subplot(2,1,2);
-if size(resps,2) == 2
-    plot(rc.x(:,1),bresp);
+if size(rc.x,2) > size(rc.x,1)
+    xval = rc.x(1,:);
 else
-    plot(rc.lfptimes./10,bresp);
+    xval = rc.x(:,1);
 end
+if lineplot == 1
+    subplot(2,1,1);
+    plot(rc.x(:,1),aresp);
+    subplot(2,1,2);
+    if size(resps,2) == 2
+        plot(rc.x(:,1),bresp);
+    else
+        plot(rc.lfptimes./10,bresp);
+    end
 elseif lineplot == 4 %scatterplot, all on one axis
     subplot(1,1,1);
     hold off;
@@ -2795,13 +2959,32 @@ subplot(3,1,3);
 imagesc(rc.x(:,1),1:size(rc.lfp,4),aresp-bresp);
 %caxis(brange);
 else
-subplot(2,1,1);
-imagesc(rc.x(:,1),1:size(rc.lfp,4),cat(2, aresp, blr(1,:)'));
-text(rc.x(end,1),0,'blank');
-caxis(arange);
-subplot(2,1,2);
-imagesc(rc.x(:,1),1:size(rc.lfp,4),cat(2, bresp, blr(1,:)'));
-caxis(brange);
+    if size(resps,2) > 3
+        if size(resps,3) == 24
+            nr = 5;
+        elseif size(resps,3) ==16
+            nr = 4;
+        elseif size(resps,3) ==8
+            nr = 3;
+        end
+        for j = 1:size(resps,3)
+            subplot(nr,nr,j);
+            im = squeeze(resps(:,:,j));
+            im = [im; mean(im)];
+            im = cat(2,im,mean(im,2));
+            imagesc(im);
+        end
+    else
+        subplot(2,1,1);
+        imagesc(xval,1:size(rc.lfp,4),cat(2, aresp, blr(1,:)'));
+        text(xval(end),0,'blank');
+        title(labels{1});
+        caxis(arange);
+        subplot(2,1,2);
+        imagesc(xval,1:size(rc.lfp,4),cat(2, bresp, blr(1,:)'));
+        caxis(brange);
+        title(labels{2});
+    end
 end
 
 function FindSdfCorr(rc)

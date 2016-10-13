@@ -87,7 +87,7 @@ elseif strmatch('loadone',list)
 elseif strmatch(list,'load')
   LoadAllData(OTTF);
 elseif strmatch(list,'Mark')
-    OTTF.data.marked(OTTF.id) = 1;
+    OTTF.Data.marked(OTTF.id) = 1;
     set(findobj('Tag',TOPTAG),'UserData',OTTF);
  elseif strmatch(list,'NewPrefix')
      OTTF.prefix = get(findobj('Tag','Prefix'),'String');
@@ -96,15 +96,15 @@ elseif strmatch(list,'Mark')
      end
     set(findobj('Tag',TOPTAG),'UserData',OTTF);     
 elseif strmatch(list,'UnMarkAll')
-    OTTF.data.marked(1:end) = 0;
+    OTTF.Data.marked(1:end) = 0;
     set(findobj('Tag',TOPTAG),'UserData',OTTF);
     RePlot(OTTF);
 elseif strmatch(list,'UnMark')
-    OTTF.data.marked(OTTF.id) = 0;
+    OTTF.Data.marked(OTTF.id) = 0;
     set(findobj('Tag',TOPTAG),'UserData',OTTF);
     RePlot(OTTF);
 elseif strmatch(list,'PrintMarkList')
-    idx = find(OTTF.data.marked > 0);
+    idx = find(OTTF.Data.marked > 0);
     if isempty(idx) && isfield(OTTF.plot,'selected')
         idx = OTTF.plot.selected;
     end
@@ -390,7 +390,7 @@ elseif strmatch(list,'popplot')
 elseif strmatch(list,'nextmarked')
     it = findobj(gcf, 'Tag',OTTF.listtag);
     n = get(it, 'value');
-    idx = find(OTTF.data.marked == 1);
+    idx = find(OTTF.Data.marked == 1);
     id = min(find(idx > n));
     if ~isempty(id)
         set(it, 'value',idx(id));
@@ -426,6 +426,7 @@ elseif strmatch(list,'save')
         end
     end
     fprintf('Saving Data to %s\n',OTTF.statefile);
+    BackupFile(OTTF.statefile,'print');
     save(OTTF.statefile,'OTTF');
 elseif strmatch(list,'loadstate')
     if length(varargin) > 0 & ischar(varargin{1})
@@ -439,7 +440,7 @@ elseif strmatch(list,'comment')
      OTTF.comments{OTTF.id} = get(findobj('Tag','FileComment'),'String');
      runlist('store',OTTF);
 elseif strmatch(list,'update')
-     top = num2str(OTTF.toplevel);
+     top = num2str(double(OTTF.toplevel));
      OTTF.prefix = get(findobj('Tag','Prefix'),'String');
      OTTF.args = get(findobj('Tag','Args'),'String');
      OTTF.plot.legendpos = get(findobj('Tag','LegendPos'),'value') -1;
@@ -510,9 +511,12 @@ function OTTF = LoadState(OTTF)
     oldplot = OTTF.plot;
     oldgui = OTTF.gui;
     menus = OTTF.menus;
-    
+    oldDATA = OTTF;
     
     tic; load(OTTF.statefile); toc
+    if isfield(OTTF,'data') && isfield(OTTF.data,'marked')
+        OTTF.Data.marked = OTTF.data.marked;
+    end
     f = fields(oldplot);
     for j = 1:length(f)
         if ~isfield(OTTF.plot,f{j})
@@ -534,7 +538,25 @@ function OTTF = LoadState(OTTF)
     OTTF.gui = oldgui;
     OTTF.toplevel = toplevel;
     OTTF.menus = menus;
- 
+    f = fields(oldDATA);
+    for j = 1:length(f)
+        if ~isfield(OTTF,f{j})
+            OTTF.(f{j}) = oldDATA.(f{j});
+        end
+    end
+    if ~isempty(OTTF.xfunc)
+        OTTF = feval(OTTF.xfunc, 'checkload', OTTF);
+    end
+    if ispc
+        drive = pwd;
+        drive = drive(1:2);
+    else
+        drive = '';
+    end
+    for j = 1:length(OTTF.fstrings)
+        OTTF.fstrings{j} = regexprep(OTTF.fstrings{j},'^[A-Z]:','');
+        OTTF.fstrings{j} = [drive OTTF.fstrings{j}];
+    end
 
 function name = SetStateName(OTTF)
 
@@ -573,7 +595,7 @@ end
 
 funcalled = 0;
 argon = {};
-  if get(findobj('Tag','LFP'),'value')
+  if get(findobj(OTTF.toplevel,'Tag','LFP'),'value')
        argon = {argon{:} {'lfp'}};
    end
    if get(findobj(OTTF.toplevel,'Tag','ShowN'),'value')
@@ -868,9 +890,9 @@ if isfield(OTTF,'xfunc') & ~funcalled
      
  end
 runlist('store',OTTF);
-if OTTF.state.verbose & isfield(OTTF.data, 'current')
+if OTTF.state.verbose & isfield(OTTF,'data') & isfield(OTTF.data, 'current')
     [area, depth] = GetPenData(OTTF.data.current.name);
-    fprintf('%s V%d %.3f\n',splitpath(OTTF.data.current.name),area,depth);
+    fprintf('%s (%d) V%d %.3f\n',splitpath(OTTF.data.current.name),id,area,depth);
     toc;
 end
 
@@ -972,7 +994,7 @@ if isfield(OTTF,'xfunc')
 end
 
 if isempty(OTTF.listids)
-    if strmatch(OTTF.listtype,{'rufus', 'dufus', 'lem', 'ic', 'dae'})
+    if strmatch(OTTF.listtype,{'rufus', 'dufus', 'lem', 'ic', 'dae', 'jbe'})
         for j = 1:length(OTTF.fstrings)
             if ~isempty(strfind(OTTF.fstrings{j},OTTF.listtype))
                 fstrings{n} = OTTF.fstrings{j};
@@ -1017,6 +1039,7 @@ elseif ~exist(list,'file')
     return;
 else
     OTTF.fstrings = textread(list,'%s');
+
 end
 
 OTTF.state.showonset= 0;
@@ -1111,11 +1134,19 @@ OTTF.gui.wsiz = wsiz;
 
 if ~isempty(bgcfileprefix) & ~strncmp(bgcfileprefix,OTTF.fstrings{1},length(bgcfileprefix))
     OTTF.prefix = bgcfileprefix;
+elseif ispc && OTTF.fstrings{1}(1) == '/'
+    D = pwd;
+    OTTF.prefix = D(1:2);
 else
     OTTF.prefix = '';  
 end
 %if use /bgc/bgc as path, should always work.
+if strfind(OTTF.fstrings{1},'/bgc/bgc')
 OTTF.prefix = '';
+elseif ispc && OTTF.fstrings{1}(1) == '/'
+    D = pwd;
+    OTTF.prefix = D(1:2);
+end
 if iscellstr(list)
     OTTF.list = 'struct';
 else
@@ -1156,6 +1187,7 @@ end
 OTTF.listids = 1:length(OTTF.fstrings);
 laststr = 0;
 for j = 1:length(OTTF.fstrings)
+    OTTF.fstrings{j} = strrep(OTTF.fstrings{j},'\','/');
     if OTTF.fstrings{j}(1) == '#';
         deletestr(j) = 1;
         laststr = 1;
@@ -1183,7 +1215,7 @@ if ~isempty(OTTF.prefix)
 end
 
 for j = 1:length(OTTF.fstrings)
-    OTTF.data.marked(j) = 0;
+    OTTF.Data.marked(j) = 0;
 end
 
 
@@ -1324,7 +1356,7 @@ bp(1) = bp(1)+bp(3)+SPACE;
   uicontrol(gcf,'Style', 'text','String','List','Position', bp);
   bp(1) = bp(1) +bp(3) + SPACE;
   bp(3) = 70;
-  uicontrol(gcf,'style','pop','string','All|FullPeriod|HalfPeriod|dufus|rufus|lem|ic|dae', ...
+  uicontrol(gcf,'style','pop','string','All|FullPeriod|HalfPeriod|dufus|rufus|lem|ic|dae|jbe', ...
 		    'Callback', ' runlist(''relist'')', 'Tag','ListType',...
 		    'position',bp);
   
@@ -1461,7 +1493,7 @@ if isempty(findobj('Tag',tag))
   cntrl_box = figure('Position', [200 scrsz(4)-(h+30)*wsc w*wsc h*wsc], 'Menubar', 'none',...
        'NumberTitle', 'off', 'Tag',tag,'Name','Section Criteria');
    OTTF.figid.options = cntrl_box;
-   top = num2str(OTTF.toplevel); 
+   top = num2str(double(OTTF.toplevel)); 
    cw = 10 * wsc;
    ch = 11 * wsc;
    bh = 18*wsc;

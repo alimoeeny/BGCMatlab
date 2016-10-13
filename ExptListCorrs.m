@@ -1,7 +1,7 @@
 function [res, details] = ExptListCorrs(list, varargin)
 %
 %ExptListCorrs(list....
-%takes a cell array of strings in liest, reads in those files, and
+%takes a cell array of strings in list, reads in those files, and
 %calculates correlations between any simultaneously recorded cells. 
 res = [];
 verbose = 0;
@@ -18,6 +18,13 @@ end
 
 if iscell(list) && ~iscellstr(list)
     [res, details] = CalcCorrs(list, [], varargin);
+    return;
+end
+if isfield(list,'Expt')
+    for j = 1:length(list.Spikes)
+        Expts{j} = All2Expt(list, j, 'all');
+    end
+    [res, details] = CalcCorrs(Expts, [], varargin);
     return;
 end
 for j = 1:length(list)
@@ -113,11 +120,12 @@ nc = 0;
 if length(condition)
     details.ztype = 2;
    for j = 1:length(Expts)
-       for k = j+1:length(Expts)
+       for k = j:length(Expts)
            [a,b] = ExptCorr(Expts{j},Expts{k},condition);
            if ~isempty(b) & ~isnan(b.rawxc)
            b.xc = a;
            b.cells = [cells(j) cells(k)];
+           b.probes = [mean(Expts{j}.Header.probe) mean(Expts{k}.Header.probe)];
            b.state.dprime = [GetExptQuality(Expts{j}) GetExptQuality(Expts{k})];
            nc = nc+1;
            res(nc) = b;
@@ -134,7 +142,7 @@ else
                seeds(k) = Expts{j}.Trials(k).seed(end);
            end
        end
-       for k = j+1:length(Expts)
+       for k = j:length(Expts)
            b.ntrials = 0;
            b.rsc = NaN;
            b.cells = [cells(j) cells(k)];
@@ -147,7 +155,7 @@ else
                    nx = nx+1;
                    az{nx} = (ares.counts{c} - mean(ares.counts{c}))/std(ares.counts{c});
                    for d = 1:length(ares.ids{c})
-                   aspks{nx}{d} = Expts{j}.Trials(ares.ids{c}(d)).Spikes;
+                   aspks{nx}{d} = Expts{j}.Trials(ares.tidx{c}(d)).Spikes;
                    end
                    eb(nx,1) = ares.y(nx);
                end
@@ -169,7 +177,7 @@ else
                    nx = nx+1;
                    bz{nx} = (bres.counts{c} - mean(bres.counts{c}))/std(bres.counts{c});
                    for d = 1:length(bres.ids{c})
-                       bspks{nx}{d} = Expts{k}.Trials(bres.ids{c}(d)).Spikes;
+                       bspks{nx}{d} = Expts{k}.Trials(bres.tidx{c}(d)).Spikes;
                    end
                    eb(nx,2) = ares.y(nx);
                end
@@ -199,8 +207,10 @@ else
                xc = corrcoef(a(id),x(id));
                if isfield(Expts{j},'probes')
                b.probesep = mean((Expts{j}.probes(aid)-Expts{k}.probes(bid)));
+               b.probes = [mean(Expts{j}.probes(aid)) mean(Expts{k}.probes(bid))];
                else
                b.probesep = mean((Expts{j}.Header.probe-Expts{k}.Header.probe));
+               b.probes = [mean(Expts{j}.Header.probe) mean(Expts{k}.Header.probe)];
                end
                ps = ReadPenSep(Expts{j}.Header);
                if isfield(Expts{j}.Header,'probesep') & Expts{j}.Header.probesep > 0

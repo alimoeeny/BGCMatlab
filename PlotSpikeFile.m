@@ -2,6 +2,7 @@ function result = PlotSpikeFile(spkfile, varargin)
 % PlotSpikeFile(file, varargin)
 % Plots the spike waveform data from a single file on disk
 % useful for looking at spikes made by autocutting in AllVPcs
+% PlotSpikeFile(file, 'quickspks')
 Spks = [];
 AllSpikes = {};
 preperiod = 500;
@@ -12,6 +13,9 @@ C = [];
 excludetrials = [];
 probe =1;
 files{1} = spkfile;
+quickspks = 0;
+distancemeasure = '2Gauss';
+parentfigure = [];
 j = 1;
 while j <= length(varargin)
     if isstruct(varargin{j})
@@ -23,49 +27,92 @@ while j <= length(varargin)
             C = varargin{j};
             probe = C.probe;
         end
+    elseif strncmp(varargin{j},'distancemeasure',12)
+        j = j+1;
+        distancemeasure = varargin{j};
     elseif strncmp(varargin{j},'exclude',6)
         j = j+1;
         excludetrials = varargin{j};
+    elseif strncmp(varargin{j},'parentfigure',6)
+        j = j+1;
+        parentfigure = varargin{j};
+    elseif strncmp(varargin{j},'quickspks',6)
+        quickspks = 100;
     elseif strncmp(varargin{j},'spkfile',6)
         j = j+1;
         files{length(files)+1} = varargin{j};
+    elseif strncmp(varargin{j},'Trial',6)
+%select trial. If used with 'quickspks', shows block with this trial
+        j = j+1;
+        selecttrial = varargin{j};
     end
     j = j+1;
 end
 
 
-    
-[probes(1), ex, xs ] = Name2Probe(spkfile);
-if length(files) > 1
-    for j = 1:length(files)
-        probes(j) = Name2Probe(files{j});
-        AllSpikes{probes(j)} = ReadSpikeFile(files{j});
-    end
-else
-    Spikes = ReadSpikeFile(spkfile);
-end
-probe = probes(1);
+if isfield(spkfile,'Spikes') %passed the Spks file, not name
+    Spikes = spkfile.Spikes;
+    Clusters = spkfile.Clusters;
 
-cfile = strrep(spkfile,'/Spikes','');
-cfile = sprintf('%s/Expt%d%sClusterTimesDetails.mat',fileparts(cfile),ex,xs);
-afile = sprintf('%s/Expt%d%sAutoClusterTimesDetails.mat',fileparts(cfile),ex,xs);
-if exist(cfile)
-    load(cfile);
-end
-if exist(afile)
-    a = load(afile);
-    if exist('ClusterDetails')  %have both
-        for j = 1:length(a.ClusterDetails)
-            if j > length(ClusterDetails) || isempty(ClusterDetails{j})
-                ClusterDetails{j} = a.ClusterDetails{j};
-            end
+    spkfile = Spikes.Header.loadname;
+    [probe, ex, xs ] = Name2Probe(spkfile);
+    probes = probe;
+else
+    [probes(1), ex, xs ] = Name2Probe(spkfile);
+    if length(files) > 1
+        for j = 1:length(files)
+            probes(j) = Name2Probe(files{j});
+            AllSpikes{probes(j)} = ReadSpikeFile(files{j});
         end
+        probe = probes(1);
     else
-        ClusterDetails = a.ClusterDetails;
+        probe = probes(1);
+        Spikes = ReadSpikeFile(spkfile);
+        result.Spikes = Spikes;
+        if isfield(Spikes,'probe')
+            probe = Spikes.probe;
+        end
+    end
+    cfile = strrep(spkfile,'/Spikes','');
+    cfile = sprintf('%s/Expt%d%sClusterTimesDetails.mat',fileparts(cfile),ex,xs);
+    afile = sprintf('%s/Expt%d%sAutoClusterTimesDetails.mat',fileparts(cfile),ex,xs);
+    if exist(cfile)
+        Clusters = LoadCluster(cfile,'rawxy');
+    else
+        Clusters = {};
+    end
+    if exist(afile)
+        a = load(afile);
+        if exist('ClusterDetails')  %have both
+            for j = 1:length(a.ClusterDetails)
+                if j > length(ClusterDetails) || isempty(ClusterDetails{j})
+                    ClusterDetails{j} = a.ClusterDetails{j};
+                end
+            end
+        else
+            ClusterDetails = a.ClusterDetails;
+        end
+    end
+    cfile = sprintf('%s/Expt%d%sClusterTimes.mat',fileparts(cfile),ex,xs);
+end
+if length(Clusters) >= probe
+    Cp = Clusters{probe};
+else
+    Cp = {};
+end
+if length(Clusters) >= probe && isfield(Clusters{probe},'xy')
+    Spikes.xy = Clusters{probe}.xy;
+    Clusters{probe}.exptid = floor(Clusters{probe}.exptno);
+elseif exist('ClusterDetails') && isfield(ClusterDetails{probe},'xy')
+    Spikes.xy = Clusters{probe}.xy;
+    if exist(cfile)
+        load(cfile);
+        Clusters{probe}.clst = ClusterDetails{probe}.clst;
+        Clusters{probe}.xy = Spikes.xy;
     end
 end
-if exist('ClusterDetails') && isfield(ClusterDetails{probe},'xy')
-    Spikes.xy = ClusterDetails{probe}.xy;
+
+if isfield(Spikes,'xy')
     DATA.Spikes.cx = Spikes.xy(:,1);
     DATA.Spikes.cy = Spikes.xy(:,2);
 end
@@ -79,7 +126,7 @@ end
 if ~isfield(Spks,'values') %failed to load - 
     return;
 end
-if size(Spks.xy,1) < size(Spks.values,1)
+if isfield(Spks,'xy') && size(Spks.xy,1) < size(Spks.values,1)
     fprintf('Size mismatch %d XY vals, %d Spike Vals\n',size(Spks.xy,1) ,size(Spks.values,1));
 end
 if isfield(C,'clst') && size(C.clst,1) == size(Spks.codes,1)
@@ -95,22 +142,39 @@ t = Spks.times(1);
 nt = 1;
 tw = 10000;
 if isempty(Expt)
-while t < max(Spks.times)
-    Expt.Trials(nt).Start = t;
-    Expt.Trials(nt).End = t + tw;
-    Expt.Trials(nt).Trial = nt;
-    Expt.Trials(nt).id = nt;
-    t = t+tw+preperiod+postperiod;
-    id = find(Spks.times > t);
-    if length(id)
-    t = Spks.times(id(1))-preperiod;
+    while t < max(Spks.times)
+        Expt.Trials(nt).Start = t;
+        Expt.Trials(nt).End = t + tw;
+        if ~isfield(Expt.Trials,'Trial') || isempty(Expt.Trials(nt).Trials)
+            Expt.Trials(nt).Trial = nt;
+        end
+        if ~isfield(Expt.Trials,'id') || isempty(Expt.Trials(nt).id)
+            Expt.Trials(nt).id = nt;
+        end
+        t = t+tw+preperiod+postperiod;
+        id = find(Spks.times > t);
+        if length(id)
+            t = Spks.times(id(1))-preperiod;
+        end
+        nt = nt+1;
     end
-    nt = nt+1;
-end
+else
+    if isfield(Expt.Header,'suffixes')
+        sid = find(Expt.Header.suffixes ==ex);
+        Expt.Header.BlockStartid(end+1) = 1+Expt.Trials(end).id;
+        if ~isempty(sid)
+            tid = find(ismember([Expt.Trials.id],Expt.Header.BlockStartid(sid):Expt.Header.BlockStartid(sid+1)));
+            Expt.Trials = Expt.Trials(tid);            
+        end
+    end
+    nt = length(Expt.Trials);
 end
 Expt.Header.trange = minmax(Spks.times);
 Expt.Header.Name = spkfile;
 Expt.Header.cellnumber = 0;
+if ~isempty(parentfigure)
+    DATA.toplevel = parentfigure;
+end
 DATA.plot.syncoverlay = 0;
 if length(AllSpikes)
     DATA.AllSpikes = AllSpikes;
@@ -193,12 +257,51 @@ DATA.vstep = 1;
 DATA.densityplot = 0;
 DATA.plot.setptsize = 0;
 DATA.spikelist = [0:4];
-DATA.sids{1} = 0;
-DATA.sids{2} = 0;
+DATA.sids = {};
 for j = 1:length(excludetrials)
     DATA.Expts{1}.Trials(excludetrials(j)).Trial  =  abs(DATA.Expts{1}.Trials(excludetrials(j)).Trial)  .* -1; 
 end
-DATA = SpoolSpikes(DATA, varargin{:});
+
+
+DATA = PC.SetDefaults(DATA);
+DATA.mahaltype = distancemeasure;
+DATA.options.usesavedcodes = 1;
+DATA.nprobes = 24;
+DATA.plot.density = 0;
+if ~isfield(Spks,'Vrange')
+    if isfield(Spks,'maxv')
+        Spks.VRange = [-Spks.maxv Spks.maxv];
+    else
+        Spks.VRange = minmax(Spks.values(:));
+    end
+end
+DATA.exptid = ex;
+DATA.show.linecontextmenus=0;
+DATA.plot.trighist = 1;
+
+result.Clusters = Clusters;
+result.probe = probe;
+if quickspks
+    [F, isnew] = GetFigure(DATA.tag.spikev,'parentfigure',parentfigure);
+    if strcmp(DATA.Expts{1}.Header.DataType,'Spike2Swatches') % && selecttrial
+        [tt, ts] = expt.BlockTimes(DATA.Expts{1});
+        id = find(ts(:,1) < selecttrial & ts(:,2) > selecttrial);
+        tt = tt .* 10000;
+        sid = find(Spks.times > tt(id,1) & Spks.times < tt(id,2));
+        Spks.times = Spks.times(sid);
+        Spks.values = Spks.values(sid,:);
+        Spks.codes = Spks.codes(sid,:);
+    end
+    PC.QuickSpikes(DATA,Spks,Cp);
+    [F, isnew] = GetFigure(DATA.tag.clusterxy,'parentfigure',parentfigure);
+    hold off;
+    PC.PlotClusterXY(DATA,Cp);
+else
+    DATA = SpoolSpikes(DATA, varargin{:});
+    result.toplevel = DATA.toplevel;
+    result.svfig = DATA.svfig;
+end
+
 if isfield(DATA,'dprime')
     result.dprime = DATA.dprime;
 end
@@ -208,8 +311,6 @@ end
 if isfield(DATA,'dprimet')
     result.dprimet = DATA.dprimet;
 end
-result.toplevel = DATA.toplevel;
-result.svfig = DATA.svfig;
 
 
 function [probe, ex, xs] = Name2Probe(name)
@@ -239,7 +340,36 @@ if ~exist(spkfile)
     Spikes = [];
     return;
 end
-load(spkfile);
+X = load(spkfile);
+if isfield(X,'Spikes')
+    Spikes = X.Spikes;
+else %old spike2 swatch file
+    fprintf('Setting %s\n',spkfile);
+    f = fieldnames(X);
+    a = find(strncmp('Ch',f,2));
+    Spikes = X.(f{a(1)});
+    p = sscanf(Spikes.title,'Spike %d');
+    clfile = strrep(spkfile,'/Spikes/','/');
+    clfile = regexprep(clfile,'A.p[0-9]+t[0-9]+',sprintf('.p%dcl',p));
+    clfile = regexprep(clfile,'.p[0-9]+t[0-9]+',sprintf('.p%dcl',p));
+    if exist(clfile)
+        X = load(clfile);
+        clid  = X.clid;
+    end
+    probefile = regexprep(clfile,'.p[0-9]+cl','probes');
+    X = load(probefile);    
+    id = find([X.probes.probe] == p);
+    [a,b] = fileparts(spkfile);
+    fid = find(strcmp([b '.mat'],{X.probes(id).filename}));
+    a = X.probes(id(fid)).firsti;
+    Spikes.codes(:,1) = clid(a:a+Spikes.length-1);
+    Spikes.codes(:,2) = clid(a:a+Spikes.length-1);
+    Spikes.probe = p;
+end
+if isfield(Spikes,'Vrange') && ~isfield(Spikes,'VRange')
+    Spikes.VRange = Spikes.Vrange;
+end
+Spikes.Header.loadname = spkfile;
 if size(Spikes.values,2) > 100
     Spikes.values = Spikes.values';
 end

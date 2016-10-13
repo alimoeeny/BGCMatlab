@@ -46,6 +46,11 @@ elseif size(x,1) == size(n,2)
 elseif length(x) == length(n)
     id = find(~isnan(x));
     m = sum(x(id) .* n(id))./sum(n(id));
+elseif size(x,1) == length(n)
+    id = find(~isnan(sum(x,2)));
+    m = (n(id)' * x(id,:))./sum(n(id));   
+else
+    m = ones(size(x)) .* NaN;
 end
 
 if dosqrt(1)

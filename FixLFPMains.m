@@ -1,13 +1,88 @@
 
-function [LFP, avgs] = FixLFPMains(LFP, tics, varargin)
+function [LFP, avgs, pwrs] = FixLFPMains(LFP, tics, varargin)
 % LFP = FixLFPMains(LFP, tics)
 % remove mains artifact from LFP by calculating triggered averad
 % Also scales channels 17:24 by 20 to match gain
 % FixLFPMains(LFP,tics,'gain', xx) forces a different scale factor
 %
+%tics is the timestamps for mains phase, taken if necessary from the other
+%.mat file
 
 %before Sep19, had a gain difference between LFP chans of 20
 %New boards on Sep 19 all have the same gain.
+
+rebuild = 0;
+maxtime = 0;
+exptlist = [];
+if ischar(tics)
+    varargin = {tics varargin{:}};
+end
+for j = 1:length(varargin)
+    if strcmp(varargin{j},'rebuild')
+        rebuild = 1;
+    elseif strcmp(varargin{j},'exptlist')
+        j = j+1;
+        exptlist = varargin{j};        
+    elseif strcmp(varargin{j},'maxtime')
+        j = j+1;
+        maxtime = varargin{j};
+    end
+    j = j+1;
+end
+
+if ischar(LFP) && isdir(LFP) %find .lfp files in dir and process all
+    d = mydir([LFP '/*.lfp.mat']);
+    Headers = {};
+    if strcmp(tics,'rebuild')
+        rebuild = 1;
+    end
+    for j = 1:length(d);
+        eid = GetExptNumber(d(j).name);
+        if (isempty(exptlist) || ismember(eid,exptlist));
+        fprintf('Loading %s\n',d(j).name);
+        load(d(j).name);
+        if ~isfield(LFP,'Trials')
+            fprintf('No Trials in %s\n',d(j).name);
+        elseif (~isfield(LFP.Header,'MainsNoise') ||  rebuild) 
+            mfile = regexprep(d(j).name,'A(\.[0-9]*).lfp.mat','$1.mat');
+            eid = GetExptNumber(d(j).name);
+            if exist(mfile)  && (isempty(exptlist) || ismember(eid,exptlist));
+                X = load(mfile);
+                f = fields(X);
+                if isfield(X,'Ch31')
+                    maxtime = max(X.Ch31.times).*10000;
+                end
+                tics = [];
+                for k = 1:length(f);
+                    if isfield(X.(f{k}),'title') && strcmp(X.(f{k}).title,'Mains')
+                        tics = X.(f{k}).times .*10000;
+                        maxtime = max([max(tics) maxtime]);
+                        LFP = FixLFPMains(LFP,tics,'maxtime',maxtime);
+                        Headers{j} = LFP.Header;
+                        if isfield(LFP.Header,'MainsNoise')
+                            save(d(j).name,'LFP');
+                        end
+                    end
+                end
+                if isempty(tics)
+                    cprintf('error','No Mains Record in %s\n',mfile);
+                end
+            end
+        else
+            Headers{j} = LFP.Header;
+        end
+        if isfield(LFP.Trials,'MainsGain')
+            Headers{j}.MainsGain = [LFP.Trials.MainsGain];
+        end
+        end
+    end
+    LFP = Headers;
+    return;
+elseif ischar(LFP)
+    cprintf('red','No Directory %s\n',LFP);
+    return;
+end
+
 if datenum(LFP.Header.RecDate) > 733669
     forcegain = 1;
 else
@@ -20,8 +95,9 @@ rate = LFP.Header.CRsamplerate .* 10000; %tics/sample
 len = ceil(333.3./rate);
 blocks = [];
 avgs = [];
+pwrs = [];
 fillchannel = 0;
-
+nerr = 0;
 j = 1;
 while j <= length(varargin)
     if strncmpi(varargin{j},'blocks',3)
@@ -47,6 +123,31 @@ end
 for j = 1:length(LFP.Trials)
     lens(j) = size(LFP.Trials(j).LFP,1);
     chs(j) = size(LFP.Trials(j).LFP,2);
+    starts(j) = LFP.Trials(j).Start;    
+end
+
+%id Start AND id both step backwards, its the bug when spike2 failed to
+%clear LFP
+if isfield(LFP.Header,'Spike2ver')
+    s2ver = LFP.Header.s2ver .* 100;
+else
+    s2ver = 0;
+end
+%breaks = find(diff([LFP.Trials.Start]) < 0 & diff([LFP.Trials.id]) <0);
+breaks = find(diff([LFP.Trials.id]) <0);
+if ~isempty(breaks)  && s2ver < 100;
+    id = 1:(breaks(1));
+    gid = [LFP.Trials(id).id];
+    nid = setdiff([LFP.Trials.id],gid);
+    if ~isempty(nid)
+        nerr = nerr+1;
+        err = sprintf('%s has ids %d - %d, but then "Hanging" Trials after  %d - %d',LFP.Header.Name,min(gid),max(gid),min(nid),max(nid));
+        cprintf('red','%s\n',err);
+        LFP.errs{nerr} = err;
+    end
+    LFP.Trials = LFP.Trials(id);
+    chs = chs(id);
+    lens = lens(id);    
 end
 
 nch = prctile(chs,90);
@@ -101,7 +202,10 @@ for j = goodch
         end
         ids{j} = id(find(~isnan(id)));
         if isempty(ids{j})
-            fprintf('Trial %d No ids\n', j);
+            nerr = nerr+1;
+            err = sprintf('Trial %d No ids', j);
+            cprintf('red','%s\n',err);
+            LFP.errs{nerr} = err;
         end
         if j >= 717
             weighted = 0;
@@ -152,7 +256,7 @@ tlen = min(lens);
 if isempty(avgs)
     return;
 end
-if plotmean
+if plotmean && size(avgs,1) > 100
     k = 1;
     for j = 1:100:size(avgs,1)-100
         Z(k,:) = squeeze(mean(avgs(j:j+100,:,plotmean)));
@@ -162,6 +266,16 @@ if plotmean
 end
 
 if nch > 1
+    if isfield(LFP.Header,'MainsNoise') && trackpwr
+        navg = LFP.Header.MainsNoise;
+    else
+        navg = squeeze(mean(avgs,1));
+    end
+    ugain = sum(navg(:).*navg(:));
+    for b = 1:size(avgs,1)
+        gains(b) = sum(sum(squeeze(avgs(b,:,:)) .* navg))./ugain;
+        LFP.Trials(b).MainsGain = gains(b);
+    end
     for b = 1:length(blocks)-1;
         id = find(goodch >= blocks(b) & goodch < blocks(b+1));
         id = goodch(id);

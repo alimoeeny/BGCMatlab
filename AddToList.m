@@ -1,15 +1,10 @@
 function AddToList(list,name)
+%appends string 'name'  to text file 'list'
+%[id, ok] = AddToList(list,name) 
 
-%[id, ok] = CheckListforName(list,name);
 fid = fopen(list,'a');
-if fid > 0 
-    if iscell(name)
-        for j = 1:length(name)
-           fprintf(fid,'%s\n',name{j});
-        end
-    else
-    fprinf(fid,'%s\n',name);
-    end
+if fid > 0
+    fprintf(fid,'%s\n',name);
     fclose(fid);
 end
 

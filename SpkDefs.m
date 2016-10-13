@@ -12,8 +12,10 @@ WURTZOKW=20;
 ENDTRIAL=16;
 CANCELEXPT=19;
 BWISREADY=4;
+AUTOSTOREOFF=27;
 
 STOREBIT=16;
+PSYCHBIT = 2^15;
 
 stimnames = {'none' ,	'gabor',	'rds' ,	'grating',	'bar',	'circle',...
 	'rectangle','test',	'square',	  'probe',	  '2grating',  'cylinder',...

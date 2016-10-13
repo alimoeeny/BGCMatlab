@@ -1,10 +1,10 @@
-function nbuilt = filterim( sf, or, wi, varargin)
+function [nbuilt, details] = filterim( sf, or, wi, varargin)
 
 %filterim( sf, or, rsd, varargin)
 % make SF/ori bandpass filtered image
 % sf(1) is peak, sf(2) is SD of Gaussian in frequency domain (cpd)
 % or(1) is peak orientaiton, or(2) is Gaussian sd.
-% rsd is a Gaussian envelope applied to the result.
+% rsd is SD a Gaussian envelope applied to the result.
 %
 %filterim( sf, or, rsd, 'save', dir) saved PGM images in dir
 %
@@ -29,11 +29,15 @@ version = version(11:end-1); % just the numbber
 quietmode = 0;
 nuilt = 0;
 envelopetype = 'Gauss';
+envelopeid = 0;
+rfenvelope = [];
 envsmw = 1; %widht
+parallel = 0;
 
 savedir = [];
 getft = 0;
-plotim =1;
+getimages = 0;
+state.plotim =1;
 j = 1;
 while j < nargin -2
     if(strncmpi(varargin{j},'save',4))
@@ -42,6 +46,9 @@ while j < nargin -2
 	mkpath([savedir '/']);
     elseif(strncmpi(varargin{j},'checkreplace',4))
         checkreplace = 1;
+    elseif(strncmpi(varargin{j},'rfenvelope',4))
+        j = j+1;
+        rfenvelope = varargin{j};
     elseif(strncmpi(varargin{j},'envelope',4))
         j = j+1;
         envelopetype = varargin{j};
@@ -52,11 +59,13 @@ while j < nargin -2
 
     elseif(strncmpi(varargin{j},'getft',4))
         getft = 1;
+    elseif(strncmpi(varargin{j},'getimages',4))
+        getimages = 1;
     elseif(strncmpi(varargin{j},'nseed',4))
         j = j+1;
         nseed = varargin{j};
     elseif(strncmpi(varargin{j},'noplot',4))
-        plotim = 0;
+        state.plotim = 0;
     elseif(strncmpi(varargin{j},'imsize',4))
         j = j+1;
         imsize = varargin{j};
@@ -66,6 +75,8 @@ while j < nargin -2
     elseif(strncmpi(varargin{j},'pix2deg',4))
         j = j+1;
         pix2deg = varargin{j};
+    elseif(strncmpi(varargin{j},'parallel',4))
+        parallel = 1;
     elseif(strncmpi(varargin{j},'quieter',6))
         quietmode = 2;
     elseif(strncmpi(varargin{j},'quiet',4))
@@ -81,6 +92,8 @@ while j < nargin -2
     end
     j = j+1;
 end
+
+
 
 if checkreplace
     propfile = [savedir '/paramlist'];
@@ -101,13 +114,17 @@ rsd = wi/(2.5066 * pix2deg);
 center = 1+ (imsize/2);
 [x,y] = meshgrid(1:imsize,1:imsize);
 r = sqrt((x-center).^2 + (y-center).^2);
+envelopeid = find(strcmp(envelopetype,{'Gauss' 'cosine'}));
 if strcmp(envelopetype,'cosine')
-edger = ((wi/pix2deg)-r) * pi*pix2deg/envsmw;
-envelope = (1+sin(edger))/2;
-envelope(edger < -pi/2) = 0;
-envelope(edger > pi/2) = 1;
+    edger = ((wi/pix2deg)-r) * pi*pix2deg/envsmw;
+    envelope = (1+sin(edger))/2;
+    envelope(edger < -pi/2) = 0;
+    envelope(edger > pi/2) = 1;
 else
-envelope = exp(-(r.^2)/(2*rsd^2));
+    envelope = exp(-(r.^2)/(2*rsd^2));
+end
+if ~isempty(rfenvelope)
+    envelope = envelope .* rfenvelope;
 end
 angle = atan2(y-center,x-center);
 
@@ -147,53 +164,50 @@ end
 
 % for some reason FTa .*FTb does not quite convolve, need FTa .*
 % fftshift(FTb), so do this by just NOT shifting the fitler....
+details.filter = filter;
 filter = fftshift(filter);
-
     tic;
     nbuilt = 0;
     imsum = zeros(256);
     fts = zeros([nseed 256 256]);
-for seed = 1:nseed
-    buildim = 1;
-    if ~isempty(savedir)
-        imname = sprintf('%s/se%d.pgm',savedir,seed);
-        if exist(imname,'file') && ~replace
-            if quietmode < 1
-                fprintf('%s exists\n',imname);
+
+    
+    
+    
+    
+    
+    state.seedoffset = seedoffset;
+    state.quietmode = quietmode;
+    state.gamma = gamma;
+    state.buildim = 1;
+    state.replace = replace;
+    if parallel
+        ftcells = {};
+        parfor seed = (1:nseed)
+            im = BuildIm(savedir,seed, state, filter, envelope);
+            if ~isempty(im)
+            nbuilt = nbuilt+1;
             end
-            buildim = 0;
+            fts(seed,:,:) = fft2(im-0.5);
         end
+        details.ft = squeeze(fts(end,:,:));
+    else
+        for seed = 1:nseed
+            [im, ft] = BuildIm(savedir,seed, state, filter, envelope);
+            if ~isempty(im)
+            nbuilt = nbuilt+1;
+            if getft
+                fts(nbuilt,:,:) = fft2(im-0.5);
+            elseif getimages
+                fts(nbuilt,:,:) = im;                
+            end
+            end
+        end
+        details.image = im;
+        details.ft = ft;
     end
-    if buildim
-        rand('state',seed+seedoffset);
-        im = rand(256) - 0.5;
-        ft = fft2(im);
-        
-        ft = fftshift(ft).* filter;
-        im = real(ifft2(ft)) .* envelope;
- %       im = real(ifft2(ft));
-        scale = 0.5/max(max(abs(im)));
-        im = 0.5 + im .* scale;
-        if gamma
-            im = im .^(1/gamma);
-        end
-        if ~isempty(savedir)
-            imwrite(im,sprintf('%s/se%d.pgm',savedir,seed),'PGM');
-        elseif plotim
-            GetFigure('Filtered Images');
-            subplot(1,2,1);
-            imagesc(abs(fftshift(ft)));
-            subplot(1,2,2);
-            imagesc(real(im));
-            colormap('gray');
-        end
-        imsum = imsum+abs(0.5-im);
-        nbuilt = nbuilt+1;
-        if getft
-            fts(nbuilt,:,:) = fft2(im-0.5);
-        end
-    end
-end
+    
+
 if ~isempty(savedir) & nbuilt
     fid = fopen(sprintf('%s/paramlist',savedir),'w');
     if fid > 0
@@ -205,13 +219,62 @@ if ~isempty(savedir) & nbuilt
         fprintf(fid,'or %.2f sd %.2f\n',or(1),or(2));
         fprintf(fid,'gamma %.2f\n',gamma);
         fprintf(fid,'imsz %.0f sd %.2f\n',imsize,wi/2.5066);
+        fprintf(fid,'envelope %d %.1f\n',envelopeid,envsmw);
         fclose(fid);
     end
+    fid = fopen(sprintf('%s/paramhistory',savedir),'a');
+    if fid > 0
+        fprintf(fid,'%s V%s se%d px %.4f',datestr(now),version,seedoffset,pix2deg);
+        fprintf(fid,'sf %.4f %.4f or%.1f env%d',sf(1),sf(2),or(1),or(2), envelopeid);
+        fclose(fid);
+    end
+    str = savedir;
+else
+    str = sprintf('or=%.0f,bw=%.0f',or(1),or(2));
 end
 if nbuilt >1 | quietmode < 2
-fprintf('Took %.3f for seed %d %s (%d new images)\n',toc,seedoffset,savedir,nbuilt);
+fprintf('Took %.3f for seed %d %s (%d new images)\n',toc,seedoffset,str,nbuilt);
 end
 
-if getft
+if getft || getimages
     nbuilt = fts;
 end
+
+
+function [im, ft] = BuildIm(savedir, seed, state,filter, envelope)
+    if ~isempty(savedir)
+        imname = sprintf('%s/se%d.pgm',savedir,seed);
+        if exist(imname,'file') && ~state.replace
+            if state.quietmode < 1
+                fprintf('%s exists\n',imname);
+            end
+            state.buildim = 0;
+        end
+    end
+    if state.buildim
+        rand('state',seed+state.seedoffset);
+        im = rand(256) - 0.5;
+        ft = fft2(im);
+        
+        ft = fftshift(ft).* filter;
+        im = real(ifft2(ft)) .* envelope;
+ %       im = real(ifft2(ft));
+        scale = 0.5/max(max(abs(im)));
+        im = 0.5 + im .* scale;
+        if state.gamma
+            im = im .^(1/state.gamma);
+        end
+        if ~isempty(savedir)
+            imwrite(im,sprintf('%s/se%d.pgm',savedir,seed),'PGM');
+        elseif state.plotim
+            GetFigure('Filtered Images');
+            subplot(1,2,1);
+            imagesc(abs(fftshift(ft)));
+            subplot(1,2,2);
+            imagesc(real(im));
+            colormap('gray');
+        end
+    else
+        im = [];
+        ft = [];
+    end

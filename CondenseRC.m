@@ -18,7 +18,7 @@ if (strmatch(Expt.Stimvals.e2,'Dc') & strmatch(Expt.Stimvals.et,{'dx', 'Pd'})) .
         if ~isempty(Expt.Trials(j).Start & ~isempty(Expt.Trials(j).(sv)))
             Expt.Trials(j).Start = Expt.Trials(j).Start(1);
             Expt.Trials(j).End = Expt.Trials(j).End(end);
-            if ~strcmp(eb,'e0');
+            if ~strcmp(eb,'e0') && isfield(Expt.Trials,eb);
                 Expt.Trials(j).(eb) = Expt.Trials(j).(eb)(end);
             end
             x = Expt.Trials(j).(ea)(end);
@@ -68,6 +68,9 @@ for j = 1:length(Expt.Trials)
     end
     if isfield(Expt.Trials,'st')
         Expt.Trials(j).st = median(Expt.Trials(j).st);
+    end
+    if isfield(Expt.Trials,'ce')
+        Expt.Trials(j).ce = median(Expt.Trials(j).ce);
     end
 end
 if Expt.Trials(1).Dw >=18

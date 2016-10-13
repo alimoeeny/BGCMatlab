@@ -34,6 +34,7 @@ state.maxamp = 0;
 state.posamp = 0;
 state.period = 360;
 state.wrap = 1;
+state.meanlimit = [];
 
 j = 1;
 while j <= nargin -2
@@ -48,11 +49,11 @@ while j <= nargin -2
       id = find(~isinf(x));
       guess(BASE) = min(y(id));
       guess(AMP) = (max(y(id)) - min(y(id)))/1.2;
-      guess(MEAN) = mean(x(id))+ mean((x(id)-mean(x(id))) .* (y(id)-min(y(id))))/mean(y(id)-min(y(id)));
-      guess(SD) = std(((x(id)-mean(x(id))) .* (y(id)-guess(BASE))))/mean(y(id)-guess(BASE));
+      %guess(MEAN) = mean(x(id))+ mean((x(id)-mean(x(id))) .* (y(id)-min(y(id))))/mean(y(id)-min(y(id)));
+      %guess(SD) = std(((x(id)-mean(x(id))) .* (y(id)-guess(BASE))))/mean(y(id)-guess(BASE));
       nguess(BASE) = max(y(id));
       nguess(AMP) = -guess(AMP);
-      nguess(MEAN) = mean(x(id)) + mean((x(id)-mean(x(id))) .* (y(id)-max(y(id))))/mean(y(id)-max(y));
+      %nguess(MEAN) = mean(x(id)) + mean((x(id)-mean(x(id))) .* (y(id)-max(y(id))))/mean(y(id)-max(y));
       nguess(SD) = guess(SD);
       guess(AMP2) = guess(AMP);
        end
@@ -223,7 +224,7 @@ else
   diffs = (fity - y).^2;
 end
 
-if isfield(state,'nreps')
+if isfield(state,'nreps') && length(state.nreps) == length(diffs)
     SSD = sum(diffs .* state.nreps(id));
 else
     SSD = sum(diffs);

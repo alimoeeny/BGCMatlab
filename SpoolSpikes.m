@@ -2,17 +2,65 @@ function DATA = SpoolSpikes(DATA, varargin)
 %
 % GUI for playing back spikes from existing expts.
 % Called from PlotExptSpikes
-[DATA.spkvarnames, DATA.spkvarorder] = GetSpikeVals(DATA,NaN,NaN,NaN,[]);
-DATA = PlaySpikes(DATA, DATA.Expts{DATA.currentexpt},varargin{:});
+if isfigure(DATA)
+    SetSpoolState(DATA,varargin{:});
+else
+    [DATA.spkvarnames, DATA.spkvarorder] = GetSpikeVals(DATA,NaN,NaN,NaN,[]);
+    DATA = PlaySpikes(DATA, DATA.Expts{DATA.currentexpt},varargin{:});
+end
+
+function SetSpoolState(f, varargin)
+j = 1;
+while j <= length(varargin)
+    if strncmpi(varargin{j},'plotdprime',6)
+        plotdprime = 1;
+    elseif strncmpi(varargin{j},'excludelist',10)
+        j = j+1;
+        SetTrialList(f, 'excludelist', varargin{j});
+    end
+    j = j+1;
+end
+
+function SetTrialList(sfig, varargin)
+
+    excludelist = [];
+j = 1;
+while j <= length(varargin)
+    if strncmpi(varargin{j},'plotdprime',6)
+        plotdprime = 1;
+    elseif strncmpi(varargin{j},'excludelist',10)
+        j = j+1;
+        excludelist = varargin{j};
+    end
+    j = j+1;
+end
+
+    
+    DATA = GetDataFromFig(sfig);
+    Expt = DATA.Expts{DATA.currentexpt};
+    it = findobj(DATA.svfig,'Tag','TrialList');
+    trials = [Expt.Trials.Trial];
+    if length(excludelist)
+        trials(excludelist) = abs(trials(excludelist)).*-1;
+    end
+    set(it,'string',num2str(trials'),'value',1);
 
 function DATA = PlaySpikes(DATA, Expt, varargin)
 
 global mousept;
 plotdprime = 0;
+selecttrials = [];
+verbose = 0;
 j = 1;
 while j <= length(varargin)
     if strncmpi(varargin{j},'plotdprime',6)
         plotdprime = 1;
+    elseif strncmpi(varargin{j},'excludelist',10)
+        j = j+1;
+        excludelist = varargin{j};
+    elseif strncmpi(varargin{j},'selecttrials',10)
+        j = j+1;
+        selecttrials = varargin{j};
     end
     j = j+1;
 end
@@ -159,7 +207,12 @@ if isnew
     uicontrol(gcf,'Style', 'checkbox',...
     'String', 'Stop', 'Tag', 'StopSpool', 'Position', bp,'value',0,...
     'Callback',@Update);
-    tmpdat.parentfigtag = DATA.tag.clusterxy;
+   bp = [0.91 0 0.09 1];
+   h = uicontrol(gcf,'Style', 'list',...
+    'String', num2str([Expt.Trials.Trial]'), 'Tag', 'TrialList','Units','norm', 'Position', bp,'value',1,...
+    'Max',3,'Min',1,'Callback',@ListTrial);
+
+tmpdat.parentfigtag = DATA.tag.clusterxy;
     set(sfig,'UserData',tmpdat);
     set(sfig, 'WindowScrollWheelFcn',@ScrollTrial);
 
@@ -168,8 +221,11 @@ end
 
     it = findobj(sfig,'Tag','ChooseTrial');
     set(it,'string',sprintf('%d|',[Expt.Trials.Trial]),'value',1);
+    it = findobj(sfig,'Tag','TrialList');
+    set(it,'string',num2str([Expt.Trials.Trial]'),'value',1);
     DATA.svfig = sfig;
-ax = findobj(DATA.svfig,'type','ax');
+
+    ax = findobj(DATA.svfig,'type','ax');
 
 if DATA.state.uselfp
     DATA.state.lfig = GetFigure('LFP');
@@ -177,7 +233,12 @@ if DATA.state.uselfp
     Expt = LoadSpike2LFP(Expt);
 end
 colors = mycolors;
-Spks = DATA.AllData.Spikes;
+if isfield(DATA,'AllSpikes')
+    Spks = DATA.AllSpikes{DATA.probe};
+    nprobes = length(DATA.probelist);
+else
+    Spks = DATA.AllData.Spikes;
+end
 tstart = now;
 if isfield(Spks,'values')
 nsamples = size(Spks.values,2);
@@ -195,9 +256,11 @@ if DATA.plot.autoscale == 0
     set(gca,'Ylim',DATA.plot.clusterYrange,'ylimmode','manual');
 end
 set(0,'CurrentFigure',sfig);
-xprobes = [];
-probes = DATA.probe;
+xprobes = DATA.probelist(2:end);
+probes = DATA.probelist;
 x = 32; %should calculate real size..
+hold off;
+
 for k = 0:length(xprobes)
     ids{k+1} = FindSpikes(DATA, Expt.Header.trange,probes(k+1),[]);
     for j = 1:nclusters+1
@@ -206,20 +269,25 @@ for k = 0:length(xprobes)
     end
     if isfield(DATA,'AllSpikes')
         %nclusters needs to be max # used across all probes
-        if length(DATA.plot.voffsets) > k & DATA.plot.prettyfigs
-        h = text(25,DATA.plot.voffsets(k+1)+1,sprintf('Probe %d',probes(k+1)));
+        npts = size(DATA.AllSpikes{probes(k+1)}.values,2);
+        if length(DATA.plot.voffsets) > k 
+            if DATA.plot.prettyfigs
+                h = text(npts-4,DATA.plot.voffsets(k+1)+1,sprintf('Probe %d',probes(k+1)));
+            else
+                h = text(npts-4,DATA.plot.voffsets(k+1)+1,sprintf('%d',probes(k+1)));
+            end
         set(h,'FontWeight','bold');
         else
         text(x,(k-(nprobes-1)/2) * DATA.plot.SpikeVsep,num2str(probes(k+1)));
         end
         ncut = sum(DATA.AllSpikes{probes(k+1)}.codes(:,2) > 0);
         if ncut
-            id = find(ismember(DATA.AllSpikes{probes(k+1)}.codes(ids{k+1},2),spikelist));
+            id = find(ismember(DATA.AllSpikes{probes(k+1)}.codes(ids{k+1},2),DATA.spikelist));
 %            ids{k+1} = ids{k+1}(id);
         end
-        if ~isfield(DATA.AllSpikes{probes(k+1)},'dVdt')
-            DATA.AllSpikes{probes(k+1)} = CleanSpikes(DATA.AllSpikes{probes(k+1)});
-        end
+%        if ~isfield(DATA.AllSpikes{probes(k+1)},'dVdt')
+%            DATA.AllSpikes{probes(k+1)} = CleanSpikes(DATA.AllSpikes{probes(k+1)});
+%        end
     end
 end
 set(xyfig,'UserData',DATA);
@@ -238,15 +306,20 @@ if max(ids{1}) > length(DATA.Spikes.cx)
     DATA = CalcClusterVars(DATA,  ispk);
 end
 end
-if isfield(DATA.AllData.Spikes,'codes')
-id = find(DATA.AllData.Spikes.codes(ids{1},2) > nclusters);
-if length(id)
-    DATA.AllData.Spikes.codes(ids{1}(id),2) = 0;
-end
+if isfield(DATA,'AllSpikes')
+    id = find(DATA.AllSpikes{DATA.probe(1)}.codes(ids{1},2) > nclusters);
+    if length(id)
+        DATA.AllSpikes{DATA.probe(1)}.codes(ids{1}(id),2) = 0;
+    end
+elseif isfield(DATA.AllData.Spikes,'codes')
+    id = find(DATA.AllData.Spikes.codes(ids{1},2) > nclusters);
+    if length(id)
+        DATA.AllData.Spikes.codes(ids{1}(id),2) = 0;
+    end
 end
 
 DATA = CheckForPCA(DATA, expspks, 0);
-        xprobes = [];
+xprobes = DATA.probelist(2:end);
         
 DATA.vstep = DATA.plot.SpikeMaxV * 0.8;
     if DATA.plot.SpikeVsep > 0
@@ -304,7 +377,7 @@ if timemode
     end
 end
 
-probes = DATA.probe;
+probes = DATA.probelist;
 if length(probes) > 1 && isfield(DATA,'AllSpikes')
     if DATA.plot.synccluster > 0
         DATA.Spikes.cx(1:end) = 0;
@@ -317,7 +390,7 @@ if length(probes) > 1 && isfield(DATA,'AllSpikes')
 
     
 % even if plotting non sync spikes, want to know which are synced
-%    if DATA.syncsign < 2
+    if DATA.syncsign < 2 || DATA.syncsign == 6
         dt = 2;
 
 
@@ -346,14 +419,19 @@ if length(probes) > 1 && isfield(DATA,'AllSpikes')
                 aid = aid(id);
                 bid = bid(id);
             end
+            if DATA.syncsign == 6
+            DATA.sids{1,j} = aid;
+            DATA.sids{j,1} = bid;
+            else
             DATA.sids{1} = aid;
             DATA.sids{j} = bid;
+            end
             aids{j} = aid;
             if ismember(DATA.plot.synccluster,[3 4 5 6]) % need PCA
                 [E, V, DATA.pca] = SpikePCA(DATA.AllSpikes,[probes(1) probes(j)],{aid bid} );
             end
         end
-        if length(probes) == 3 %intersection of all three
+        if length(probes) == 3 && DATA.syncsign ~= 6 %intersection of all three
             [DATA.sids{1}, bi, ci] = intersect(aids{2},aids{3});
             DATA.sids{2} = DATA.sids{2}(bi);
             DATA.sids{3} = DATA.sids{3}(ci);        
@@ -368,13 +446,19 @@ if length(probes) > 1 && isfield(DATA,'AllSpikes')
             end
         end
         end
+    end
 
 end
 start = max([DATA.firsttrial 1]);
 last = length(Expt.Trials);
 % negative Trial numbers indicate manual exclusion
 uset = start-1+find([Expt.Trials(start:last).Trial] > 0);
-nsync = 0;nspks = 0;
+if ~isempty(selecttrials)
+    uset = find(ismember([Expt.Trials.Trial],selecttrials));
+end
+nsync = 0;
+nspks = 0;
+DATA.expname = GetName(DATA.Expts{1});
 tc = 1;
 while tc <= length(uset)  %not for loop, so can change tc inside loop
     trial = Expt.Trials(uset(tc)).Trial;
@@ -410,6 +494,7 @@ while tc <= length(uset)  %not for loop, so can change tc inside loop
         else
             ustim = 0;
         end
+        Trial.blockcntr = tc;
         Trial.ed = GetEval(Expt,'ed',DATA.currenttrial);
         if DATA.syncsign < 2 & length(probes) > 1
             [spks, sspks, cx, cy] = PlotTrialSyncSpikes(DATA, times, [DATA.probe xprobes], colors,'Trial',Trial);
@@ -498,13 +583,19 @@ else
 end
 DATA.currentcluster = floor(median(cluster)); %in case its mixed
 
+if isfield(Spks,'xy')
+
 if plotdprime
 [dp, details]  = PlotDprime(DATA,0,1);
 [dp, a]  = CalcDprime(DATA,cluster,'track');
 else
-[dp, details]  = CalcDprime(DATA,cluster);
+    dp = NaN;
+    details = [];
+%[dp, details]  = CalcDprime(DATA,cluster);
 end
-if isfield(DATA.AllData.Spikes,'dVdt')
+if isfield(DATA,'AllSpikes')
+    dps = [];
+elseif isfield(DATA.AllData.Spikes,'dVdt')
 [dps(1), a]  = CalcDprime(DATA,cluster,'xparam',1,'yparam',8);
 [dps(2), a]  = CalcDprime(DATA,cluster,'xparam',1,'yparam',44);
 [dps(3), a]  = CalcDprime(DATA,cluster,'xparam',1,'yparam',45);
@@ -522,7 +613,7 @@ DATA.s2clusters = Expt.gui.s2clusters;
 DATA.dprime = dp;
 DATA.dprimes = dps;
 if isfield(details,'dps')
-DATA.dprimet = details.dps;
+    DATA.dprimet = details.dps;
 end
 if isfield(details,'distances')
     DATA.distances = details.distances;
@@ -556,7 +647,10 @@ if DATA.state.fixrange
 end
 mousept.xrange = diff(xrange);
 mousept.yrange = diff(yrange);
-fprintf('Spool Took %.2f\n',(now-tstart) * 24 * 60 * 60);
+end
+if verbose
+    fprintf('Spool Took %.2f\n',(now-tstart) * 24 * 60 * 60);
+end
 if isfield(DATA,'AllClusters')
     set(0,'currentfig',DATA.xyfig);
     plot(DATA.Spikes.cx(allspks),DATA.Spikes.cy(allspks),'.','markersize',DATA.ptsize);
@@ -704,8 +798,13 @@ function [dprime, details] = CalcDprime(DATA,cluster, varargin)
         fprintf('More than one clusterid in this cell\n');
     end
     
+    if isfield(DATA,'AllSpikes')
+        id = find(DATA.AllSpikes{DATA.probe(1)}.codes(DATA.spklist,2) == cluster);
+        nid = find(DATA.AllSpikes{DATA.probe(1)}.codes(DATA.spklist,2) == 0);
+    else
     id = find(DATA.AllData.Spikes.codes(DATA.spklist,2) == cluster);
     nid = find(DATA.AllData.Spikes.codes(DATA.spklist,2) == 0);
+    end
     sy = ((yr-mean(yr(id)))./std(yr));
     sx = ((xr-mean(xr(id)))./std(xr));
     sd = abs(sx+i*sy);
@@ -790,6 +889,7 @@ timemode = 0;
 nprobes = 1;
 voff = NaN;
 ip = 1;
+showxy = 1;
 while j <= length(varargin)
     if strncmpi(varargin{j},'lineoff',6)
         j = j+1;
@@ -845,6 +945,8 @@ splen = size(Spks.values,2);
 % try calculating energy for all spikes in Expt in one step.
 ispk = find(Spks.times > times(1) &...
         Spks.times < times(2));
+
+
 if isfield(DATA,'AllClusters')
     return;
 end
@@ -853,10 +955,14 @@ end
     if length(PCs) < max(ispk)
         PCs = Spks.codes;
     end
-if isfield(DATA,'sids') 
-    syncspk = find(ismember(ispk,DATA.sids{ip}));
-    syncspklst = ismember(ispk,DATA.sids{ip});
-    if length(probe) == 2
+if isfield(DATA,'sids') && ~isempty(DATA.sids)
+% syncspk lists ids for Spks (current probe) that co-incide with the
+% reference probe
+    syncspk = find(ismember(ispk,DATA.sids{ip,1}));
+    [syncspklst,ts] = ismember(ispk,DATA.sids{ip,1});
+%ts is ids of reference probe, thatn match this
+    ts = find(ismember(DATA.sids{ip,1},ispk));
+    if length(probe) == 2 && DATA.syncsign ~= 6
         Spks.values = (DATA.AllSpikes{probe(1)}.values(DATA.sids{1},:)+DATA.AllSpikes{probe(2)}.values(DATA.sids{2},:))/2;
         Spks.times =  DATA.AllSpikes{probe(1)}.times(DATA.sids{1});
         ispk = find(Spks.times > times(1) &...
@@ -866,9 +972,21 @@ if isfield(DATA,'sids')
     Spks.codes(ispk,3) = 0;
     Spks.codes(ispk(syncspk),3) = 1;
     ctype = 3;
+    elseif DATA.syncsign == 6  && ip > 1
+        ispk = ispk(syncspk);
+        refcodes = DATA.AllSpikes{DATA.probelist(1)}.codes(DATA.sids{1,ip}(ts),ctype);
+    else
+        ii = find(Spks.codes(ispk,ctype) >= 0);
+        ispk = ispk(ii);
     end
+    dts = DATA.AllSpikes{DATA.probelist(ip)}.times(DATA.sids{ip,1}(ts)) - DATA.AllSpikes{DATA.probelist(1)}.times(DATA.sids{1,ip}(ts));
+    dts = round(dts .* 4);
+else
+    dts = zeros(size(ispk));
 end
-
+if DATA.syncsign == 6 && probe == DATA.probe(1)
+    dts = zeros(size(ispk));
+end
 if DATA.probe < 100
     if isfield(Spks,'dVdt')
         [cx, DATA] = GetSpikeVals(DATA,ispk, Spks.values(ispk,:), Spks.dVdt(ispk,:),DATA.plot.clusterX, classify,PCs(ispk,:));
@@ -887,6 +1005,8 @@ if DATA.probe < 100
         end
         cx = Spks.xy(ispk,1);
         cy = Spks.xy(ispk,2);
+    else
+        showxy = 0;
     end
             adc = Spks.values(ispk,:);
 % recut == 2 means that clusters are not set here, but clusters have
@@ -914,9 +1034,12 @@ end
         for spk = 1:length(ispk);
             if DATA.syncsign < 2 & isfield(DATA,'sids')
                 j = syncspklst(spk)+1;
+            elseif DATA.syncsign == 6  && probe ~= DATA.probelist(1)
+                j = refcodes(spk)+1;
             else
                 j = Spks.codes(ispk(spk), ctype)+1;
             end
+            if j > 0
             if DATA.plot.dvdt ==2
                 vs{j} = [vs{j} dvdt(spk,:) NaN];
                 xs{j} = [xs{j} adc(spk,1:splen-1) NaN];
@@ -928,10 +1051,11 @@ end
                 xs{j} = [xs{j} [1:splen]+(Spks.times(ispk(spk))-times(1)).*timemode NaN];
             elseif DATA.plot.nodc
             vs{j} = [vs{j} adc(spk,:)-mean(adc(spk,:)) NaN];
-            xs{j} = [xs{j} [1:splen] NaN];
+            xs{j} = [xs{j} [1:splen]+dts(spk) NaN];
             else
             vs{j} = [vs{j} adc(spk,:) NaN];
             xs{j} = [xs{j} [1:splen] NaN];
+            end
             end
         end
         if length(DATA.plot.voffsets) >= ip
@@ -965,27 +1089,32 @@ end
                 else
                     vh(k) = line('Xdata' , xs{j}, 'Ydata', vs{j});
                 end
-            elseif vh(k) && ishandle(vh(k)) %no spikes, wipe clean
+            elseif myhandle(vh(k)) %no spikes, wipe clean
                     set(vh(k),'Xdata' , 0, 'Ydata', 0);
             end
         end
         if ~isempty(Trial)
 %            xc = ExtraLabels(Trial);
-xc = '';
+            xc = '';
             nspk = sum(Spks.codes(ispk,2) == DATA.currentcluster);
             title(sprintf('Trial %d (id%d %.2f - %.2f) ed%.3f%s %d/%d spks P%d',abs(Trial.Trial),...
                 Trial.id,Trial.Start(1)./10000,Trial.End(end)./10000,Trial.ed,xc,nspk,length(ispk),DATA.probe));
         end        
 
         if probe == DATA.probe
-        drawnow;
-        set(0,'CurrentFigure',DATA.xyfig);
-        for j = 0:nclusters
-            sp = find(Spks.codes(ispk, ctype) == j);
-            plot(cx(sp),cy(sp),...
-                '.','color',DATA.spkcolor{j+1},'markersize',DATA.ptsize);
-            hold on; %% need this when called from PlotOneTrial
-        end
+            drawnow;
+            if showxy                
+                set(0,'CurrentFigure',DATA.xyfig);
+                for j = 0:nclusters
+                    sp = find(Spks.codes(ispk, ctype) == j);
+                    plot(cx(sp),cy(sp),...
+                        '.','color',DATA.spkcolor{j+1},'markersize',DATA.ptsize);
+                    hold on; %% need this when called from PlotOneTrial
+                    if Trial.blockcntr == 1 %first Trial
+                        title(sprintf('%s',DATA.expname));
+                    end
+                end
+            end
         end
     end
     DATA.minplottime = 0.00;
@@ -1245,7 +1374,14 @@ function PlayNextTrial(a, b)
 DATA = GetDataFromFig(a);
 PlayOneTrial(DATA,a,1);
 
-function SelectTrial(a, b)
+function ListTrial(a, b)
+DATA = GetDataFromFig(a);
+c = get(a,'value');
+for j = 1:length(c)
+PlayOneTrial(DATA,c(j),0);
+end
+
+  function SelectTrial(a, b)
 DATA = GetDataFromFig(a);
 c = get(findobj(a,'Tag','ChooseTrial'),'value');
 PlayOneTrial(DATA,c,0);
@@ -1365,8 +1501,14 @@ if DATA.state.uselfp
 end
 
 if isfield(DATA,'distances')
-cspk = find(DATA.AllData.Spikes.codes(ispk,2) == 1);
-nspk = find(DATA.AllData.Spikes.codes(ispk,2) == 0);
+
+    if isfield(DATA,'AllSpikes')
+        cspk = find(DATA.AllSpikes{DATA.probe(1)}.codes(ispk,2) == 1);
+        nspk = find(DATA.AllSpikes{DATA.probe(1)}.codes(ispk,2) == 0);
+    else
+        cspk = find(DATA.AllData.Spikes.codes(ispk,2) == 1);
+        nspk = find(DATA.AllData.Spikes.codes(ispk,2) == 0);
+    end
 d = DATA.distances;
 dp = abs(mean(d(ispk(cspk)))-mean(d(ispk(nspk))))./sqrt(mean([var(d(ispk(cspk))) var(d(ispk(nspk)))]));
 fprintf('Trial %d DPrime %.2f\n',Trial.Trial,dp);
@@ -1694,7 +1836,7 @@ if ispk
         end
     end
     adc = Spikes.values(ispk,:);
-    if isfield(DATA.AllData.Spikes,'dVdt')
+    if isfield(Spikes,'dVdt')
         energy  = sum(Spikes.dVdt(ispk,:)'.^2);
     else
     energy  = sum(diff(adc').^2);
@@ -1975,4 +2117,36 @@ x = caxis;
 set(it,'string',sprintf('%.2f',x(2)));
 set(DATA.toplevel,'UserData',DATA);
 
+function [aid, bid, n] = FindSync(at,bt,dt,varargin)
+%from two lists of times, find events synchronous witthin dt
+n = 0;
+k = 1;
+aid = [];
+bid = [];
+if isempty(at) || isempty(bt)
+    return;
+end
+if length(bt) < 101
+    bts = [1:length(bt)];
+else
+    bts = [1:101];
+end
+nb = length(bt);
+for j = 1:length(at)
+    t = bt(bts)-at(j);
+    while(t(end) < 0 & bts(end) < nb)
+        if bts(end)+100 > nb
+            bts = bts(end):nb;
+        else
+            bts = bts+100;
+        end
+        t = bt(bts)-at(j);
+    end
+    [a,b] = min(abs(t));
+    if a <= dt
+        n = n+1;
+        aid(n) = j;
+        bid(n) = bts(b);
+    end
+end
 

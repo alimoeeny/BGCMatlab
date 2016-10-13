@@ -48,7 +48,14 @@ else
 end
 
 if isempty(lid)
-    fprintf('No LFP Trials for %s\n',Expt.Header.Name);
+    xtra =[];
+    if isfield(Expt.Header,'expname')
+        xtra = Expt.Header.expname;
+    end
+    if isfield(Expt.Header,'probe');
+        xtra = [xtra '.p' num2str(Expt.Header.probe)];
+    end
+    fprintf('No LFP Trials for %s%s\n',Expt.Header.Name,xtra);
     avg = [];
     details.tid = tid;
     details.lfpid = [LFP.Trials.Trial];
@@ -69,7 +76,13 @@ elseif isfield(LFP.Trials,'RespDir') & isfield(LFP.Trials,'ob')
     if length(tid)
     [avg(:,:,1), details(1)] = SpTrigLFP(LFP.Trials(tid),20000,1./(LFP.Header.LFPsamplerate.*10000),100,argon{:});
     else
-        details(1).npk = 0;
+        details(1).nspk = 0;
+        details(1).lfpavn = 0;
+        details(1).times = 0;
+        details(1).mv = 0;
+        details(1).counts = [];
+        details(1).framev = [];
+
         avg = [];
     end
     tid = find([LFP.Trials.ob] > 120 & [LFP.Trials.RespDir] > 0);
@@ -77,6 +90,11 @@ elseif isfield(LFP.Trials,'RespDir') & isfield(LFP.Trials,'ob')
     [avg(:,:,2), details(2)] = SpTrigLFP(LFP.Trials(tid),20000,1./(LFP.Header.LFPsamplerate.*10000),100,argon{:});
     else
         details(2).nspk = 0;
+        details(2).lfpavn = 0;
+        details(2).times = 0;
+        details(2).mv = 0;
+        details(2).counts = [];
+        details(2).framev = [];
     end
 elseif nsplit > 0 & isfield(LFP.Trials,splittype);
     nc = 1;

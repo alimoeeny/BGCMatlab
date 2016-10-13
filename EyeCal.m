@@ -2,6 +2,9 @@ function [gain, pos, stds] = EyeCal(Expt, varargin)
 %[gain, pos, stds] = EyeCal(Expt, varargin)
 %calibration of eye data from mat files made by spike 2
 %EyeCal(Expt, 'summarize')
+%columns are h,v,h,v,fx,fy
+%rows are R, L. gains(1,1) = RH gain. gains(1,2) = gain of RV for H movement of fixpos
+
 
 
 MEANS = 1;
@@ -95,9 +98,14 @@ threeeyes = 0;
 addsoft = 1;
 so = [0 0 0 0];
 
-if isfield(Expt,'Comments')
+if isfield(Expt,'Comments') && ~isempty(Expt.Comments.times)
     delay = 100000; %10 sec
-    id = find(Expt.Comments.times > Expt.Trials(1).Start(1)-delay & Expt.Comments.times < Expt.Trials(1).End(end)+delay);
+    if iscell(Expt.Comments.times)
+        cmtimes = cat(2,Expt.Comments.times{:});
+    else
+        cmtimes = Expt.Comments.times;
+    end
+    id = find(cmtimes > Expt.Trials(1).Start(1)-delay & cmtimes < Expt.Trials(1).End(end)+delay);
     for j = 1:length(id)
         if ~strncmp(Expt.Comments.text{id(j)},'cm=rf',5) && ~strncmp(Expt.Comments.text{id(j)},'cm=noback',8) 
             fprintf('%.2f: %s\n',Expt.Comments.times(id(j)),Expt.Comments.text{id(j)});
@@ -108,11 +116,29 @@ end
 nsd = 0;
 sdlen = 100;
 for j = 1:length(Expt.Trials)
+    T = Expt.Trials(j);
     if isfield(Expt.Trials, 'softoff') && addsoft == 1;
         so = Expt.Trials(j).softoff .* 2;
     end
     
-    if ~isempty(Expt.Trials(j).Eyevals)
+    fx(j) = Expt.Trials(j).fx;
+    fy(j) = Expt.Trials(j).fy;
+    if isfield(Expt.Trials,'EyeData')
+        tdur = T.End(end) - T.Start(1);
+        sid = find(Expt.Header.emtimes > 0 & Expt.Header.emtimes < tdur);
+            lh(j) = mean(Expt.Trials(j).EyeData(sid,1))+ so(3);
+            rh(j) = mean(Expt.Trials(j).EyeData(sid,2))+ so(1);
+            lv(j) = mean(Expt.Trials(j).EyeData(sid,3))+ so(4);
+            rv(j) = mean(Expt.Trials(j).EyeData(sid,4))+ so(2);
+            if size(T.EyeData,2) == 6
+                threeeyes = 1;
+                xh(j) = mean(Expt.Trials(j).EyeData(sid,5));
+                xv(j) = mean(Expt.Trials(j).EyeData(sid,6));
+            end
+            stds(j,:) = std(Expt.Trials(j).EyeData);
+            rlen = size(Expt.Trials(j).EyeData,1);
+            Expt.Trials(j).good = 1;
+    elseif ~isempty(Expt.Trials(j).Eyevals)
         len = round(((Expt.Trials(j).End - Expt.Trials(j).Start)./10000)./Expt.Header.CRrates(1));
         rlen = min([length(Expt.Trials(j).Eyevals.lh) length(Expt.Trials(j).Eyevals.rh)...
             length(Expt.Trials(j).Eyevals.lv) length(Expt.Trials(j).Eyevals.rv)]);
@@ -126,8 +152,6 @@ for j = 1:length(Expt.Trials)
             stds(j,3) = std(Expt.Trials(j).Eyevals.lv(sid));
             rh(j) = mean(Expt.Trials(j).Eyevals.rh(skip+ps:ps+len)) + so(1);
             rv(j) = mean(Expt.Trials(j).Eyevals.rv(skip+ps:ps+len)) + so(2);
-            fx(j) = Expt.Trials(j).fx;
-            fy(j) = Expt.Trials(j).fy;
         stds(j,2) = std(Expt.Trials(j).Eyevals.rh(skip+ps:ps+len));
         stds(j,4) = std(Expt.Trials(j).Eyevals.rv(skip+ps:ps+len));
         ids(j) = Expt.Trials(j).id;
@@ -173,13 +197,20 @@ end
     
 np = min([length(fx) length(fy) length(lh) length(rh)]);
 good = [Expt.Trials.good] == 1; %exclude badfix trials
+if np > length(good)
+    np = length(good);
+end
 good = good(1:np);
 fx = fx(1:np);
 fy = fy(1:np);
-pos(1,:) = lh;
-pos(2,:) = rh;
-pos(3,:) = lv;
-pos(4,:) = rv;
+lh = lh(1:np);
+rh = rh(1:np);
+lv = lv(1:np);
+rv = rv(1:np);
+pos(1,:) = lh(1:np);
+pos(2,:) = rh(1:np);
+pos(3,:) = lv(1:np);
+pos(4,:) = rv(1:np);
 pos(5,:) = fx;
 pos(6,:) = fy;
 aid = find(fx < 0 & ~isnan(rh+rv+lh+lv) & good);
@@ -255,12 +286,12 @@ end
 fys(1) = mean(fy(cid));
 fys(2) = mean(fy(did));
 gain(1,1) = diff(rhm([1 2]))./diff(fxs);
-gain(1,2) = diff(rvm([1 2]))./diff(fys); %crosstalk
+gain(1,2) = diff(rvm([1 2]))./diff(fxs); %crosstalk
 gain(2,1) = diff(lhm([1 2]))./diff(fxs);
-gain(2,2) = diff(lvm([1 2]))./diff(fys);
-gain(1,3) = diff(rhm([3 4]))./diff(fxs);
+gain(2,2) = diff(lvm([1 2]))./diff(fxs);
+gain(1,3) = diff(rhm([3 4]))./diff(fys);
 gain(1,4) = diff(rvm([3 4]))./diff(fys);
-gain(2,3) = diff(lhm([3 4]))./diff(fxs);
+gain(2,3) = diff(lhm([3 4]))./diff(fys);
 gain(2,4) = diff(lvm([3 4]))./diff(fys);
 if threeeyes
 gain(3,1) = diff(xhm([1 2]))./diff(fxs);

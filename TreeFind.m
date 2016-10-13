@@ -3,7 +3,8 @@ function [res, sizes, dates, extra] = TreeFind(path, varargin)
 % returns a list of files under the tree starting in Path.
 %
 % TreeFind(path,'name','xxx')   finds files where strfind('xxx',pathname)
-% is true
+% is true. Can use regular expression
+% TreeFind(path,'name',{'xxx' 'yyy' ...} ) finds matches for each element of the cell array 
 %
 %
 % TreeFind(path,'function','myfunc')   names a function to be executed. 
@@ -23,6 +24,10 @@ res = {};
 sizes = [];
 dates = [];
 extra = [];
+recursive = 1;
+verbose = 0;
+exclude = {};
+
 j = 1;
 while j < nargin
     if strncmpi(varargin{j},'name',3)
@@ -31,6 +36,11 @@ while j < nargin
     elseif strncmpi(varargin{j},'newer',3)
         j = j+1;
         newer = varargin{j};
+    elseif strncmpi(varargin{j},'exclude',3)
+        j = j+1;
+        exclude{end+1} = varargin{j};
+    elseif strncmpi(varargin{j},'nonrecursive',5)
+        recursive = 0;
     elseif strncmpi(varargin{j},'function',3)
         j = j+1;
         funcfcn = varargin{j};
@@ -40,22 +50,39 @@ while j < nargin
         end
     elseif strncmpi(varargin{j},'print',3)
         printfiles = 1;
+    elseif strncmpi(varargin{j},'verbose',5)
+        verbose = 1;
     end
     j = j+1;
 end
 
 d = dir(path);
 for j = 1:length(d)
-   if d(j).isdir & isempty(strmatch('.',d(j).name)) && isempty(strmatch('..',d(j).name))
-        [files, ns, nd, nu] = TreeFind([path '/' d(j).name],varargin{:});
+   if d(j).isdir & isempty(strmatch('.',d(j).name)) && isempty(strmatch('..',d(j).name)) && recursive > 0
+       if sum(cellstrfind(d(j).name,exclude)) == 0
+        if isdir(path)
+            subname = [path '/' d(j).name];
+        else  %wildcard in path
+            subname = [fileparts(path) '/' d(j).name];
+        end
+        if verbose
+            fprintf('Searching %s\n',subname);
+        end
+        if ~isempty(name) & ~isempty(regexp(subname, name))
+            fprintf('Dir %s matches\n',subname);
+        end
+        [files, ns, nd, nu] = TreeFind(subname,varargin{:});
         res = {res{:} files{:}};
         sizes = [sizes ns];
         dates = [dates nd];
         extra = [extra nu];
         found = length(res);
+       end
    else
        good = 1;
         if ~isempty(name) & isempty(regexp(d(j).name,name))
+            good = 0;
+        elseif isempty(d(j).datenum)
             good = 0;
         else
             good = 1;
@@ -90,6 +117,7 @@ for j = 1:length(d)
             res{found} = pathname;
             sizes(found) = d(j).bytes;
             dates(found) = d(j).datenum;
+            extra(found).isdir = d(j).isdir;
             if printfiles
                 fprintf('%s\n',pathname);
             end

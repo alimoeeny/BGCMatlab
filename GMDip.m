@@ -1,27 +1,51 @@
-
 function [dip, details] = GMDip(xy, energy, varargin)
+% [dip, details] = GMDip(xy, energy, varargin)
+%fits a mixture of two Gaussians in one dimension to xy(:,1)
+%
+%returns  dip - three estimates of dividing line ()
+%details.mahal  vector of mahal distances for different starting points
+%details.G
 
 details.type = 1;
-plotdips = 0;
+plotdips = NaN;  %no plo tby default
 niter = 100;
 mydip = 0;
 crit = [];
 idlist = [];
+dip = NaN;
+usecritonly = 0;
+label = '';
+
 j = 1;
 while j <= length(varargin)
     if strncmpi(varargin{j},'crit',4)
+        if strncmpi(varargin{j},'critonly',8)
+            usecritonly = 1;
+        end
         j = j+1;
         crit = varargin{j};
     elseif strncmpi(varargin{j},'idlist',6)
         j = j+1;
         idlist = varargin{j};
+    elseif strncmpi(varargin{j},'label',4)
+        j = j+1;
+        label = varargin{j};
+    elseif strncmpi(varargin{j},'noplot',4)
+        plotdips = NaN;
     elseif strncmpi(varargin{j},'plot',4)
         plotdips = 1;
     end
     j = j+1;
 end
 
+if length(xy) == 0
+    return;
+end
+if diff(size(xy)) > 1
+xy = xy';
+end
 v = sort(xy(:,1));
+
 sigma = std(v);
 if mydip
     sm = sigma/10;
@@ -136,17 +160,18 @@ if isobject(energy) %evaluate a fit
     details.cdipsize = 0;
     details.G = G;
     details.gmdprime = gmdprime(G);
-
+    details.dip = dip;
     return;
 end
 
+if usecritonly == 0
     try
     Gs{1} = gmdistribution.fit(xy(:,1),2,'Options',statset('MaxIter',niter)); %2 Gaussians, 1 dimension
     d(1) = gmdprime(Gs{1});
     details.dipres(1) = 1;
     catch
-        fprintf('GMDip 1 fit failed\n');
-        Gs{1} = S;
+        fprintf('GMDip 1 %s fit failed %s)\n',label,lasterr);
+        Gs{1}.mu = [0 0];
         Gs{1}.Converged = -1;
         d(1) = 0;
         details.dipres(1) = 0;
@@ -158,16 +183,22 @@ end
     S.Sigma(:,:,2) = sigma.^2/2;
     S.PComponents = [0.5 0.5];
     try 
-    Gs{2} = gmdistribution.fit(xy(:,1),2,'Options',statset('MaxIter',niter),'Start',S);
-    d(2) = gmdprime(Gs{2});
+        Gs{2} = gmdistribution.fit(xy(:,1),2,'Options',statset('MaxIter',niter),'Start',S);
+        d(2) = gmdprime(Gs{2});
         details.dipres(2) = 1;
     catch
-        fprintf('GMDip 2 fit (%.3f, %.3f sd %.3f) failed\n',S.mu(1,1),S.mu(2,1),sigma);
+        fprintf('GMDip 2 fit (%s%.3f, %.3f sd %.3f) failed-%s\n',label,S.mu(1,1),S.mu(2,1),sigma,lasterr);
         Gs{2} = S;
         Gs{2}.Converged = -1;
         d(2) = 0;
         details.dipres(2) = 0;
     end
+    nf = 2;
+else
+    nf = 0;
+end
+
+
     for j = 1:length(crit)
         id = find(v > crit);
         nid = find(v <= crit);
@@ -177,19 +208,19 @@ end
         S.Sigma(:,:,2) = var(v(nid));
         S.PComponents = [length(id) length(nid)]./length(v);
     try 
-        Gs{2+j} = gmdistribution.fit(xy(:,1),2,'Options',statset('MaxIter',niter),'Start',S);
-        d(2+j) = gmdprime(Gs{2+j});
-        details.dipres(2+j) = 1;
+        Gs{nf+j} = gmdistribution.fit(xy(:,1),2,'Options',statset('MaxIter',niter),'Start',S);
+        d(nf+j) = gmdprime(Gs{nf+j});
+        details.dipres(nf+j) = 1;
     catch
-        fprintf('GMDip 2 fit (%.3f, %.3f sd %.3f) failed\n',S.mu(1,1),S.mu(2,1),sigma);
-        Gs{2+j} = S;
-        Gs{2+j}.Converged = -1;
-        d(2+j) = 0;
-        details.dipres(2+j) = 0;
+        fprintf('GMDip 2 fit (%s%.3f, %.3f sd %.3f) failed %s\n',label,S.mu(1,1),S.mu(2,1),sigma,lasterr);
+        Gs{nf+j} = S;
+        Gs{nf+j}.Converged = -1;
+        d(nf+j) = 0;
+        details.dipres(nf+j) = 0;
     end
     j = length(d);
         
-       if length(idlist) == length(X)
+       if length(idlist) == size(xy,1) %give a list of classifications. Start with fit to their distributions
         j = j+1;
         try
             id = find(idlist == 2);
@@ -202,16 +233,13 @@ end
             Gs{j} = gmdistribution.fit(xy(:,1),nd,'Options',statset('MaxIter',1000),'Start',S);
             d(j) = gmdprime(Gs{j});
         catch
-            fprintf('GM Fit (Start with Classification) fail\n');
+            fprintf('GM Fit %s(Start with Classification) fail%s\n',label,lasterr);
             Gs{j} = S;
             Gs{j}.Converged = -1;
             Gs{j}.NlogL = NaN;
             d(j) = 0;
         end
     end
-
-        
-        
 
     end
     
@@ -239,7 +267,7 @@ end
         d(3) = gmdprime(Gs{3});
         details.dipres(3) = 1;
     catch
-        fprintf('GMDip 3 fit failed\n');
+        fprintf('GMDip 3 fit %sfailed %s\n',label,lasterr);
         Gs{3} = S;
         Gs{3}.Converged = -1;
         d(3) = 0;
@@ -250,11 +278,19 @@ end
     for j = 1:length(Gs)
         details.converged(j) = Gs{j}.Converged;
     end
-    if details.converged(2) == 0
+if usecritonly == 0
+    if details.converged(2) == 0 && plotdips == 0
         plotdips = 1;
     end
+end
     
-    [D,b] = max(d);
+    id = find(details.converged >= 0);
+    if isempty(id)
+        [D,b] = max(d);
+    else
+        [D,b] = max(d(id));
+        b = id(b);
+    end
     G = Gs{b};
     details.G = Gs;
     details.mahal = d;
@@ -264,13 +300,18 @@ end
     details.best = b;
 
     x = linspace(min(v), max(v),500);
+    if G.Converged >= 0
     y = pdf(G, x');
     details.gxy(:,1) = x;
     y = pdf('norm',x,G.mu(1), sqrt(G.Sigma(1))) .* G.PComponents(1);
     details.gxy(:,2) = y;
     z = pdf('norm',x,G.mu(2), sqrt(G.Sigma(2))) .* G.PComponents(2);
+    else
+        y = zeros(size(x));
+        z = zeros(size(x));
+    end
 
-    if plotdips
+    if plotdips > 0
         if ~exist('rawx')
             r = range(xy(:,1));
             rawx = min(xy(:,1)) - r/10:r/100:max(xy(:,1))+r/10;
@@ -298,21 +339,29 @@ end
 
 
     gid = find(x > min(G.mu) & x < max(G.mu));
+    
     if isempty(gid)
         dip(2) = mean(G.mu);
+        peaks = max(z+y);
     else
+        peaks = z(gid([1 end])) + y(gid([1 end]));
         [aa, peak] = min(z(gid)+y(gid));
         dip(2) = x(peak+gid(1)-1);
+        dipsize(2) = aa./min(peaks);
     end
+
     peak = find(diff(sign(z-y)) ~= 0);
     [aa,bb] = max(z(peak)+y(peak));
     details.gxy(:,3) = z;
     if isempty(bb)
         dip(3) = mean(G.mu);
     else
-    dip(3) = x(peak(bb));
+        dip(3) = x(peak(bb));
+        dipsize(3) = aa./min(peaks);
     end
     dip(1) = mean(dip(2:3));
+    [aa,bb] = min(abs(dip(1)-x));
+    dipsize(1) = (z(bb)+y(bb))./min(peaks);
     
     if length(energy) > 1
     e(1) = mean(energy(find(xy(:,1) > dip(1))));
@@ -329,7 +378,7 @@ end
     else
         details.sign = -1;
     end
-    if plotdips
+    if plotdips > 0
     plot([dip(3) dip(3)],get(gca,'ylim'),'m-');
     plot([dip(2) dip(2)],get(gca,'ylim'),'m--');
     if length(dip) > 3
@@ -337,6 +386,8 @@ end
     end
     figure(cf);
     end
+    details.dipsize = dipsize;
+details.dip = dip;
 
     
     

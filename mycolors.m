@@ -6,9 +6,31 @@ function colors = mycolors(varargin)
 % mycolors('mat') returns the color values that matlab used be default when
 % plot(... is called with a NxM matrix
 % mycolors('spkcolors') returns colors used for spike drawing grey, red, green, blue...
+% mycolors(10) returns 10 pretty discriminable colors
 
 
 colors = {[1 0 0], [0 0 1], [0 1 0], [1 0 1], [0.9 0.9 0.], [0 1 1],[0.75 0 0.25],...
+        [0 0.5 0], [0.5 0 0], [0 0 0.5], [0.5 0.25 0 ], [1 0.5 1],...
+        [1 1 0.5], [0. 0.5 0], [0.25 0  0.5],[0.5 0 0.25], [0 0 0.5],[0 0 0],[1 0.5 0.5],[0.5 1. 0.5 ],...
+        [0.5 0.5 1],[1 0 0], [0 1 0], [0 0 1], [1 1 0], [1 0 1], [0 1 1],[0.75 0 0.25],[0 0.5 0], ...
+        [0.5 0 0], [0 0 0.5], [0.5 0.25 0 ], [0.25 0  0.5],[1 0.5 1],[1 1 0.5], [0.5 0 0], [0 0.5 0],...
+        [0 0 0.5],[0 0 0],[1 0.5 0.5],[0.5 1. 0.5 ],[0.5 0.5 1]...
+        [1 0 0], [0 1 0], [0 0 1], [1 1 0], [1 0 1], [0 1 1],[0.75 0 0.25],...
+        [0 0.5 0], [0.5 0 0], [0 0 0.5], [0.5 0.25 0 ], [0.25 0  0.5],[1 0.5 1],...
+        [1 1 0.5], [0.5 0 0], [0 0.5 0], [0 0 0.5],[0 0 0],[1 0.5 0.5],[0.5 1. 0.5 ],...
+        [0.5 0.5 1],[1 0 0], [0 1 0], [0 0 1], [1 1 0], [1 0 1], [0 1 1],[0.75 0 0.25],[0 0.5 0], ...
+        [0.5 0 0], [0 0 0.5], [0.5 0.25 0 ], [0.25 0  0.5],[1 0.5 1],[1 1 0.5], [0.5 0 0], [0 0.5 0],...
+        [0 0 0.5],[0 0 0],[1 0.5 0.5],[0.5 1. 0.5 ],[0.5 0.5 1]...
+        [1 0 0], [0 1 0], [0 0 1], [1 1 0], [1 0 1], [0 1 1],[0.75 0 0.25],...
+        [0 0.5 0], [0.5 0 0], [0 0 0.5], [0.5 0.25 0 ], [0.25 0  0.5],[1 0.5 1],...
+        [1 1 0.5], [0.5 0 0], [0 0.5 0], [0 0 0.5],[0 0 0],[1 0.5 0.5],[0.5 1. 0.5 ],...
+        [0.5 0.5 1],[1 0 0], [0 1 0], [0 0 1], [1 1 0], [1 0 1], [0 1 1],[0.75 0 0.25],[0 0.5 0], ...
+        [0.5 0 0], [0 0 0.5], [0.5 0.25 0 ], [0.25 0  0.5],[1 0.5 1],[1 1 0.5], [0.5 0 0], [0 0.5 0],...
+        [0 0 0.5],[0 0 0],[1 0.5 0.5],[0.5 1. 0.5 ],[0.5 0.5 1]...
+    };
+
+%wcolors are better on white backgrounds
+wcolors = {[1 0 0], [0 0 1], [0 0.75 0.1], [0.9 0 0.9], [0.9 0.9 0.1], [0 0.7 0.6],[0.75 0 0.25],...
         [0 0.5 0], [0.5 0 0], [0 0 0.5], [0.5 0.25 0 ], [0.25 0  0.5],[1 0.5 1],...
         [1 1 0.5], [0. 0.5 0], [0.5 0 0.25], [0 0 0.5],[0 0 0],[1 0.5 0.5],[0.5 1. 0.5 ],...
         [0.5 0.5 1],[1 0 0], [0 1 0], [0 0 1], [1 1 0], [1 0 1], [0 1 1],[0.75 0 0.25],[0 0.5 0], ...
@@ -28,16 +50,15 @@ colors = {[1 0 0], [0 0 1], [0 1 0], [1 0 1], [0.9 0.9 0.], [0 1 1],[0.75 0 0.25
         [0 0 0.5],[0 0 0],[1 0.5 0.5],[0.5 1. 0.5 ],[0.5 0.5 1]...
     };
 
-
 spkcolors{1} = [0.5 0.5 0.5];
 spkcolors {2} = [1 0 0];
 spkcolors {3} = [0 1 0];
 spkcolors {4} = [0 0 1];
 spkcolors {5} = [1 0 1];
-spkcolors {6} = [1 1 0];
-spkcolors {7} = [0 1 1];
-spkcolors {8} = [0 1 0];
-spkcolors {9} = [1 0 0.5];
+spkcolors {6} = [0 1 1];
+spkcolors {7} = [0.7 0.8 0];
+spkcolors {8} = [0.8 0 0.2];
+spkcolors {9} = [0 0.8 0.5];
 spkcolors {10} = [0.5 1 0];
 spkcolors {11} = [0 0.5 1];
 spkcolors {12} = [1 0.5 0.5];
@@ -64,6 +85,10 @@ colors24 = {[1 0 0], [0 0 1], [0 1 0], [1 0 1], [0.8 0.8 0.0], [0 1 1],[0.75 0 0
         [0 0.5 0],  [0 0 0.5], [0.5 0.25 0], [0 0 0.5], [0.5 0.5 1],[1 0.5 1],...
         [0.8 0.8 0.5], [0 0.5 0], [0.2 0.4 0.2], [0.2 0.5 1],[0 0 0],[1 0.5 0.5],[0.5 0.5 1 ],...
         [0.5 0.5 1],[1 0 0], [0 1 0], [0 0 1]};
+colors10 = {[1 0 0], [0 0 1], [0 1 0], [1 0 1], [0.8 0.8 0.0], [0 1 1],[0.75 0 0.25],...
+        [0 0 0],  [0 0 0.5], [0.5 0.25 0]};
+colors8 = {[1 0 0], [0 0 1], [0 1 0], [1 0 1], [0.8 0.8 0.0], [0 1 1],[0.75 0 0.25],...
+        [0 0 0]};
 
 j = 1;
 while j <= nargin
@@ -93,6 +118,8 @@ while j <= nargin
      for k = 1:size(mcolors,2)
          colors{k} = mcolors(k,:);
      end
+    elseif strncmpi(varargin{j},'white',5)
+        colors = wcolors;
     elseif strncmpi(varargin{j},'spkcolors',7)
         colors = spkcolors;
     elseif strncmpi(varargin{j},'ncolors',3)
@@ -100,7 +127,18 @@ while j <= nargin
         if nc == 24
             colors = colors24;
         end
+    elseif isnumeric(varargin{j})
+        nc = varargin{j};
+        if nc == 10
+            colors = colors10;
+        elseif nc == 24
+            colors = colors24;
+        elseif nc == 8
+            colors = colors8;
+        end
+
     elseif strncmpi(varargin{j},'plot',3)
+        plottype = varargin{j};
         if length(varargin) > j && isnumeric(varargin{j+1})
             j = j+1;
             nc = varargin{j};
@@ -113,7 +151,13 @@ while j <= nargin
         rows = round(sqrt(nc));
         hold off;
         for k = 1:nc
-            plot(rem(k-1,rows),floor((k-1)/rows),'o','color',colors{k},'markerfacecolor',colors{k})
+            if strncmpi(plottype,'plotfill',6)
+                plot(rem(k-1,rows),floor((k-1)/rows),'o','color',colors{k},'markerfacecolor',colors{k})
+            elseif strncmpi(plottype,'plotline',6)
+                plot([0 10],k+[0 10],'-','color',colors{k});
+            else
+                plot(rem(k-1,rows),floor((k-1)/rows),'o','color',colors{k})
+            end
             hold on;
         end
     end

@@ -1,6 +1,8 @@
 function [FitGauss,fval,exitflag] = FitGauss(x,y, varargin)
 %[FitGauss,fval,exitflag] = FitGauss(x,y, varargin)
 % to evaluate a fit FitGauss(x, params, varargs,'eval')
+%         or FitGauss(x, fit, 'eval', where fit is a returned fit struct.
+%         (second method ensures options like period, baseline are the same
 % params are: [mean SD AMP baseline]
 % 
 %the baseline is zero unless called with:
@@ -11,8 +13,20 @@ AMP = 3;
 SD = 2;
 MEAN = 1;
 maxiter = 5000;
+state.freebase = 0;
+state.period = 0;
+state.wrap = 0;
+state.logy = 0;
+state.maxamp = 0;
+state.posamp = 0;
+state.pweight = 0; %give more weight when fitted value is low. Doesn't work properly
+state.meanlimit = [];
 
-if length(x)  < 2 || length(y) < 2
+if isstruct(y) && isfield(y,'state')
+    infit = y;
+    state = infit.state;
+    y = y.params;
+elseif length(x)  < 2 || length(y) < 2
     fprintf('FitGauss:Insufficient Data\n');
     FitGauss = [];
     fval = 0;
@@ -27,13 +41,6 @@ if length(x) == length(y) && length(x) > 1
     guess(AMP) = max(y)/1.2;
 end
 
-state.freebase = 0;
-state.period = 0;
-state.wrap = 0;
-state.logy = 0;
-state.maxamp = 0;
-state.posamp = 0;
-state.pweight = 0; %give more weight when fitted value is low. Doesn't work properly
 j = 1;
 while j <= nargin -2
     if isstruct(varargin{j}) && isfield(varargin{j},'params')  % a fit struct
@@ -55,6 +62,9 @@ while j <= nargin -2
       nguess(SD) = guess(SD);
        end
   elseif strncmpi(varargin{j},'eval',4)
+      if ~isfield(state,'pweight')
+          state.pweight = 0;
+      end
       ssd = Minimise(y,x,zeros(size(x)),0,NaN,state);
       if state.period
           if state.wrap
@@ -104,7 +114,7 @@ while j <= nargin -2
         guess(SD) = cv2sd(abs(r));
         guess(AMP) = std(y) * 2;
     elseif state.period == 180;
-        r = MeanVector(y,x,'double');
+        r = MeanVector(y,x,'double','rmbase');
         guess(MEAN) = angle(r) .* 180/pi;
         guess(SD) = cv2sd(abs(r)) .* 1.5;
         guess(AMP) = std(y) * 2;
@@ -112,6 +122,9 @@ while j <= nargin -2
   elseif strncmpi(varargin{j},'sd',2)
     j = j+1;
     guess(SD) = varargin{j};
+  elseif strncmpi(varargin{j},'meanlimit',5)
+    j = j+1;
+    state.meanlimit = varargin{j};
   elseif strncmpi(varargin{j},'nreps',5)
     j = j+1;
     state.nreps = varargin{j};
@@ -145,7 +158,8 @@ ssd = Minimise(fittedparams,x,y,0,NaN,state);
 FitGauss.exitmsg = output.message;
 if state.freebase == 1
  [nfittedparams,nfval,nexitflag, noutput] = fminsearch(@Minimise,nguess,options,x,y,sdmax,minoffset,state);
- if nfval < fval
+ ssd = Minimise(nfittedparams,x,y,0,NaN,state);
+ if nfval < fval && nfval > 0
      fittedparams = nfittedparams;
      fval = nfval;
      exitflag = nexitflag;
@@ -167,8 +181,8 @@ else
   FitGauss.base = 0;
 end
 if state.period > 0
-fittedparams(MEAN) = mod(fittedparams(MEAN),state.period);
-   ssd = Minimise(fittedparams, x,y, 0, NaN, state);
+    fittedparams(MEAN) = mod(fittedparams(MEAN),state.period);
+   [ssd, fity] = Minimise(fittedparams, x,y, 0, NaN, state);
 end
 FitGauss.mean = fittedparams(MEAN);
 FitGauss.rss = fval;
@@ -181,11 +195,15 @@ else
 end
     
 FitGauss.exit = exitflag;
-FitGauss.fitted = Gauss(fittedparams,x);
+if state.period > 0
+    FitGauss.fitted = fity;
+else
+    FitGauss.fitted = Gauss(fittedparams,x);
+end
 FitGauss.params = fittedparams; %% in order needed for Gauss(..)
 FitGauss.state = state;
 
-function SSD = Minimise(params,x,y,sdmax,minoffset,state)
+function [SSD, fity] = Minimise(params,x,y,sdmax,minoffset,state)
 
 %BASE=4 AMP=1, SD=2, XCEN=3,
 BASE = 4;
@@ -242,6 +260,14 @@ else
   diffs = (fity - y).^2;
 end
 
+zid = find(isinf(x));
+if state.freebase && ~isempty(zid)
+    diffs(zid) = (params(BASE)-y(zid)).^2;
+end
+if ~isempty(state.meanlimit) && (params(MEAN) < state.meanlimit(1) || params(MEAN) > state.meanlimit(2))
+    diffs = diffs.*2;
+end
+
 if isfield(state,'nreps') && length(state.nreps) == length(diffs)
     SSD = sum(diffs .* state.nreps(id));
 else
@@ -255,4 +281,7 @@ if(sdmax > 0 & abs(params(SD)) > sdmax)
 end
 if(~isnan(minoffset) & params(MEAN) < minoffset)
   SSD = NaN;
+end
+if isinf(SSD)
+    SSD = NaN;
 end

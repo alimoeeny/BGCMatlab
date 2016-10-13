@@ -75,7 +75,15 @@ end
 stimtype = GetEval(Expt,'st','mode');
 [eye, eyes] = GetEval(Expt,'me','mode');
 
-if isfield(Expt.Trials,'ce')
+if isfield(Expt.Trials,'ce') 
+    if isfield(Expt.Trials,'st')
+        sid = find([Expt.Trials.st] > 0);
+        isce = sum([Expt.Trials(sid).ce] ~= 0)./length(sid);
+        isce = round(isce *4); %at least 25% of stim are correlated, else uncorr is not an interleave
+    else
+        isce = 1;
+    end
+    if isce
     nextra = nextra+1;
     extraexp{nextra} = 'ce] == 0';
     extra.label{nextra} = 'Uncorr';
@@ -83,6 +91,7 @@ if isfield(Expt.Trials,'ce')
         splitextra(nextra) = 1;
     else
         splitextra(nextra) = 0;
+    end
     end
 end
 
@@ -152,7 +161,9 @@ for ie = 1:length(extraexp)
             while(respf(j) > a/5 & j < length(ftfrq) & j < length(respf))
                 j = j+1;
             end
+            if j > 1 %in case peak is at 1
             maxf = j-1;
+            end
             j = peakf;
             while(respf(j) > a/5 & j > 1)
                 j = j-1;
@@ -167,12 +178,15 @@ for ie = 1:length(extraexp)
             bblanklfpwr = 0;
             cblanklfpwr = 0;
             lfpautof = [];
-            oft = mean(abs([Expt.Trials.FTlfp]),2);
-            result.lfpower = smooth(oft,5);
+            if isfield(Expt.Trials,'FTlfp')
+                oft = mean(abs([Expt.Trials.FTlfp]),2);
+                result.lfpower = smooth(oft,5);
+            end
         end
     end
 end
 result.extra = extra;
+result.Header = Expt.Header;
 idx = setdiff(1:length(Expt.Trials),extraidx);
 
 if ~forcexvs
@@ -241,8 +255,10 @@ for nc = 1:length(cvals)
                 result.x(ix,ie) = x;
                 result.y(ix,ie) = result.linevals(ie);
                 result.n(ix,ie) = length((idx));
-                fts = abs([Expt.Trials(idx).FTlfp]);
-                ft = mean(abs([Expt.Trials(idx).FTlfp]),2);
+                ftlfp = cat(3,Expt.Trials(idx).FTlfp);
+                ftlfp = squeeze(ftlfp(:,lfpch,:));
+                fts = abs(ftlfp);
+                ft = mean(abs(ftlfp),2);
                 if exist('btype','var')
                     stimlab = [val2str(result.x(ix,ie),type,stimtype,Expt,[]) val2str(result.y(ix,ie),btype,stimtype,Expt,[])];
                 else
@@ -262,7 +278,7 @@ for nc = 1:length(cvals)
                     if plotlfp == 2 %time domain
                         lfph(nlfp) = plot(ts,mean([Expt.Trials(idx).LFP],2),'color',colors{ix+addn+addl});
                     else
-                        lfph(nlfp) = plot(ftfrq(fidx),ft(fidx),'color',colors{ix+addn+addl});
+                        lfph(nlfp) = plot(ftfrq(fidx),smooth(ft(fidx),5),'color',colors{ix+addn+addl});
                     end
                     lfplabels{nlfp} = stimlab;
                     nlfp = nlfp + 1;
@@ -289,11 +305,22 @@ result.ftfrq = result.lfpfrq(1:nfrq);
 result.lfpn = result.n;
 
 if isfield(Expt.Header,'LFPtimes')
-    result.lfptimes = Expt.Header.LFPtimes .* 10000;
+    if diff(minmax(Expt.Header.LFPtimes)) < 100 %units must be sec.
+        result.lfptimes = Expt.Header.LFPtimes .* 10000;
+    else
+        result.lfptimes = Expt.Header.LFPtimes;
+    end
 end
 subplot(2,1,1);
+hold off;
 if nch > 1
-    plot(result.lfptimes,squeeze(result.lfp(:,:,1,lfpch))')
+    plot(result.lfptimes,squeeze(result.lfp(:,:,1,lfpch))');
+    if isfield(result.extra,'lfp')
+    for j = 1:length(result.extra.lfp)
+        hold on;
+        plot(result.lfptimes,squeeze(result.extra.lfp{j}(:,lfpch))','k:');
+    end
+    end
 else
 plot(result.lfptimes,squeeze(result.lfp)')
 end    
@@ -432,7 +459,7 @@ for j = 1:length(LFP.Trials)
     %Kludge. Need to recalc this and FTfreq in header
     LFP.Trials(j).FTlfp = abs(fft(LFP.Trials(j).LFP));
     LFP.Header.lfplen = min(lens);
-    LFP.Header.LFPtimes = rate * 10000 * ([1:min(lens)] - pre); 
+    LFP.Header.LFPtimes = rate * ([1:min(lens)] - pre); 
 end
 
 function [xvs, mindiff] = RemoveDuplicates(xvs)
