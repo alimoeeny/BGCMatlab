@@ -41,6 +41,7 @@ readexpts = 0;
 needpsych = 1;
 needseseq = 1;
 checkepos=0;
+skiplines = 0;
 addfields = {'rw' 'mD' 'Dc'};
 checkfields = {'ti' 'to'}; %include if unique >1
 Expt = [];
@@ -58,7 +59,7 @@ while j <= length(varargin)
         Expt = varargin{j};
     elseif strncmpi(varargin{j},'chkFr',5)
         checkFr= 1;
-    elseif strncmpi(varargin{j},'chkexpts',4)
+    elseif strncmpi(varargin{j},'chkexpts',6)
         checkexpts = 3;
     elseif strncmpi(varargin{j},'chkepos',4)
         checkepos = 1;
@@ -103,6 +104,9 @@ while j <= length(varargin)
             exptlist = varargin{j};
             checkrpts = 1;
         end
+    elseif strncmpi(varargin{j},'skip',4)
+        j = j+1;
+        skiplines = varargin{j};
     elseif strncmpi(varargin{j},'trials',5)
         checktrials = 1;
     end
@@ -156,6 +160,10 @@ end
 fclose(fid);
 tt = TimeMark(tt, sprintf('Read File %s',name), profiling);
 
+if skiplines > 0 && skiplines < length(a{1})
+    fprintf('Skipping %d lines\n',skiplines);
+    a{1} = a{1}(skiplines:end);
+end
 if cellstrcmp('Swaps',varargin)
     CheckSwaps(a{1});
     return;
@@ -532,9 +540,17 @@ for j = 1:length(sqid)
                         nextid = eeid;
                     end
                 elseif j == length(sqid) | eeid < sqid(j+1)
-                    id = find(posttrial < eeid);
+                    if ~isempty(eeid)
+                        id = find(posttrial < eeid);
+                    else %find ending without end expt
+                        id = [];
+                    end
                     if isempty(id)    
-                        nextid = eeid-5; %kludge should step
+                        if isempty(eeid)
+                            nextid = length(atxt);
+                        else
+                            nextid = eeid-5; %kludge should step
+                        end
                     else
                         nextid = posttrial(id(end));
                     end
@@ -600,6 +616,9 @@ for j = 1:length(sqid)
         if nextid < sqid(j) %error
             nextid = nx;
         end
+        if length(nextid) ~= 1
+            nx = nx;
+        end
 %If there are still two response strings prior to sqid, the earler one must not be a match.        
         xid = find(pid > startid & pid < sqid(j));
         if length(xid) > 1 %can't have two resposne strings
@@ -621,7 +640,8 @@ for j = 1:length(sqid)
     end
     line = atxt{sqid(j)};
 
-    
+    if length(nextid) ~= 1
+    end
     if trialmode == 1 %nf line is after O 3 .... This does not need 1 subtracting
         id = find(nfid > sqid(j));
         if isempty(id)
@@ -861,6 +881,11 @@ for j = 1:length(sqid)
         id = find(posttrial < nextid & posttrial > pid(t)+5);
         if ~isempty(id)
             nextid = posttrial(id(1));
+        else
+            nextid = length(t);
+        end
+        if length(nextid) > 1
+            nextid = nextid(1);
         end
     end
     Trials(j).stimno = stimno;
@@ -1293,6 +1318,10 @@ return;
 end
 
 if checktrials
+    if checkepos
+        fxid = strmatch('epos',atxt);
+    end
+
     openid = find(strncmp('Reopened',atxt,8));
     for j = 1:length(openid)
         sessionstart(j) = datenum(atxt{openid(j)}(14:end));
@@ -1309,11 +1338,11 @@ if checktrials
         x = split(atxt{allid(j)});
         s = regexprep(atxt{allid(j)},'.*st=none ','');
         if length(x) >= 10
-        d(1) = sscanf(x{7},'%f');
-        d(2) = sscanf(x{8},'%f');
+            d(1) = sscanf(x{7},'%f');
+            d(2) = sscanf(x{8},'%f');
         else            
-        d(1) = sscanf(x{6},'%f');
-        d(2) = sscanf(x{7},'%f');
+            d(1) = sscanf(x{6},'%f');
+            d(2) = sscanf(x{7},'%f');
         end
         tstart = sessionstart(1) + (d(1)-d(2)) ./(24 * 60 * 60);
         Trials(j).date = tstart;
@@ -1343,6 +1372,12 @@ if checktrials
         s = GetLastLine(atxt, allid(j),opid);
         if ~isempty(s)
             Trials(j).op = s;
+        end
+        if checkepos
+            s = GetLastLine(atxt, allid(j), fxid, 'epos');
+            if ~isempty(s)
+                Trials(j).epos = sscanf(s(3:end),'%f');
+            end
         end
         for k = 1:length(getcodes)
             [s, Trials(j).(getcodes{k})] = GetLastLine(atxt, allid(j),getcodeid{k},getcodes{k});
@@ -1374,6 +1409,22 @@ if checktrials
     result.allop = allop;
     for j = 1:length(ops)
         result.xops{j} = setdiff(allop,oplist{j});
+    end
+    
+    if checkepos
+        epos = cat(2,Trials.epos)
+        GetFigure('Trial Eye Pos');
+        hold off;
+        h = mean(epos([1 2],:));
+        v = mean(epos([3 4],:));
+        plot(h,v,'.');
+        smw = 25;
+        result.epos(:,1) = h;
+        result.epos(:,2) = v;
+        sh =smooth(h,smw);
+        sv =smooth(v,smw);
+        hold on;
+        plot(sh,sv,'r-');
     end
      return;
 end
@@ -1785,6 +1836,14 @@ a = bsxfun(@ge, x(:),y(:)');
 
 function CheckSwaps(txt)
 
+sid = find(strncmp('#Seq ',txt,5));
+gid = find(strncmp('#SeqG',txt,5));
+for j = 1:length(sid)
+    stims = sscanf(txt{sid(j)}(6:end),'%d');
+    if length(gid) >= j
+    groups = sscanf(txt{gid(j)}(11:end),'%d');
+    end
+end
 
 id = find(strncmp('#Swapping',txt,7));
 g{1} = [];
@@ -1798,15 +1857,22 @@ for j = 1:length(id)
         g{a(6)}(end+1) = a(5);
         lines{a(3)}(end+1) = j;
         lines{a(6)}(end+1) = j;
+        stimno(j) = a(1);
     end
+end
+ns = max(cat(2,g{:}));
+m = floor(ns/2);
+if mean(g{1}) > mean(g{2})
+    g = fliplr(g);
+    lines = fliplr(lines);
 end
 hist(g{1});
 x = ones(size(lines{1}));
-x(find(g{1} > 39)) = 0;
+x(find(g{1} > m)) = 0;
 hold off;
 plot(lines{1},x,'o');
 x = zeros(size(lines{2}));
-x(find(g{2} <40)) = 1;
+x(find(g{2} <= m)) = 1;
 hold on;
 plot(lines{2},x,'ro');
 hold off;

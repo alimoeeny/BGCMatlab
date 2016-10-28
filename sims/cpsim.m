@@ -7,6 +7,7 @@ function [cps, means, sds, xcs, all] = cpsim(pools, varargin)
 bothcorr = 0;
 ntrials = 100;
 ntotal = 2000;
+poolingnoise = 0;
 r = 0.15;
 rb = 0.12;
 all = [];
@@ -48,6 +49,20 @@ while j <= nargin -1
     elseif strncmpi(varargin{j},'ntrials',3)
         j = j+1;
         ntrials = varargin{j};
+    elseif strncmpi(varargin{j},'poolnoise',5)
+        j = j+1;
+        poolingnoise = varargin{j};
+        if length(poolingnoise) > 1
+            for k = 1:length(poolingnoise)
+                [cps,means,sds, xcs, d] = cpsim(pools, varargin{1:j-1},poolingnoise(k));
+                if isempty(all)
+                    all = d;
+                else
+                    all(k) = d;
+                end
+            end
+            return;
+        end
     elseif strncmpi(varargin{j},'plotresps',6)
         makefigure = 1;
     end
@@ -89,9 +104,15 @@ for pj = 1:length(pools)
         nresps = corr_counts(rs(pj),ntrials,poolsize);
     end
     
+    pnoise = randn(2,ntrials) .* poolingnoise;
     psum = (Wi * presps)./poolsize;
+    psum = psum + pnoise(1,:);
     nsum = (Wi * nresps)./poolsize;
+    nsum = nsum + pnoise(2,:);
+    sigsd(k+1) = std([psum nsum]);
+    nsd(k+1) = std(presps(:)); 
     dvar = psum-nsum;
+    all.poolingnoise = poolingnoise;
     choices =  dvar > 0;
     for j = 1:poolsize
         cps(pj,j+k*poolsize*2) = CalcCP(presps(j,find(choices)),presps(j,find(~choices)));
@@ -102,6 +123,10 @@ for pj = 1:length(pools)
         xcs(pj,j+poolsize+(k*poolsize*2)) = xc(1,2);
     end
     end
+    all.dprime(pj) = 1./mean(sigsd); 
+    all.ndprime(pj) = 1./mean(nsd);
+    all.pnr(pj) = all.ndprime(pj)./all.dprime(pj);
+    all.choicecorr(pj) = ChoiceCorr(mean(cps(pj,:)));
     means(pj) = mean(cps(pj,:));
     sds(pj) = std(cps(pj,:));
 end
@@ -162,3 +187,6 @@ if makefigure ==1;
    
 end
    
+function cc = ChoiceCorr(cp)
+    cc= pi./sqrt(2).*(cp -0.5);
+

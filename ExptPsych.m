@@ -87,6 +87,7 @@ colors = mycolors;
 forcetype = 0;
 forcecollapse = 0;
 columns = [1 1 1];
+fillet = { [] [] []};
 
 j = 1;
 while j <= length(varargin)
@@ -124,6 +125,12 @@ while j <= length(varargin)
    elseif strncmpi(varargin{j},'legendlabels',7)
        j = j+1;
        legendlabels = varargin{j};
+   elseif strcmp(varargin{j},'type3')
+       j = j+1;
+       type{3} = varargin{j};
+       if isfield(Expt,'Trials') && ~isfield(Expt.Trials,type{3}) && ~strcmp(Expt.Stimvals.e3,type{3});
+           fillet{3} = type{3};
+       end
    elseif strcmp(varargin{j},'type')
        forcetype =1;
        j = j+1;
@@ -293,7 +300,6 @@ if strcmp(type{2},'ori')  & ~isfield(Expt.Trials,'ori')
     end
 end
 
-fillet = { [] [] []};
 if isfield(Expt.Stimvals,'et') && ~isfield(Expt.Trials,Expt.Stimvals.et)
     fillet{1} = Expt.Stimvals.et;
 end
@@ -467,6 +473,9 @@ while j <= length(varargin)
    elseif strncmpi(varargin{j},'type3',5)
        j = j+1;
        type{3} = varargin{j};
+       if ~isfield(Expt.Trials,type{3}) && ~strcmp(Expt.Stimvals.e3,type{3});
+           fillet{3} = type{3};
+       end
    elseif strncmpi(varargin{j},'trialids',8)
        j = j+1;
        usetrials = varargin{j};

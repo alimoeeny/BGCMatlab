@@ -584,7 +584,8 @@ elseif sum(strcmp(dat.type{1},{'dx' 'dO'}))
             x(j) = dat.x(j);
             y{j} = dat.counts{j};
         end
-        fit = FitGabor(x,y);
+%need to add uncorr here if poss        
+        fit = FitGabor(x,y,varargin{:});
         fit.resp = y;
     end
     fit.ddi = CalcDDI(dat.Data);

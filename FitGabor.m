@@ -1,17 +1,18 @@
-%=================================================================================================
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 function GaborFit = FitGabor(x,y,varargin)
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %=================================================================================================
-
+%GaborFit = FitGabor(x,y)
+%GaborFit = FitGabor(x,y, u) u ir array of responses to uncorr
+% FitGabor(x,y,u, params) params provides initial fit
+%    ...,'sqrt') fits sqrt(gabor) to sqrt(counts);
 
 % Fits a Gabor to the function y(x).
 % NB the argument y is a cell array containing the different values obtained at each x.
 % If a third argument is supplied, it is assumed to be an array containing the uncorrelated response
 % If a fourth argument is supplied, it is assumed to be an initial-guess Gabor fit
+%=================================================================================================
 
-
-if nargin==3
+sqrtyuncorr = [];
+if nargin==3 && ~ischar(varargin{1})
     sqrtyuncorr = varargin{1};
     if ~isempty(sqrtyuncorr)
         uncorr = mean(varargin{1});
@@ -21,10 +22,19 @@ elseif nargin==4
     if ~isempty(sqrtyuncorr)
         uncorr = mean(varargin{1});
     end
-    g = varargin{2};
-    suppliedguessparams = [g.SF g.SD g.phase g.amp g.offet g.baseline];
+    if isfield(varargin{2},'SD')
+        g = varargin{2};
+        suppliedguessparams = [g.SF g.SD g.phase g.amp g.offet g.baseline];
+    end
 end
-
+if cellstrcmp('sqrt',varargin)
+    flag = 'sqrt';
+else
+    flag = 'linear';
+end
+if ischar(sqrtyuncorr)
+    sqrtyuncorr = [];
+end
 
 % Work out mean
 nx = length(x);
@@ -117,6 +127,7 @@ if exist('suppliedguessparams')
     trials = [trials 3];
 end
 randattempt = 0;
+
 while exitflag<=0 & randattempt<100;
     randattempt = randattempt + 1;
     for trial=1:trials
@@ -172,15 +183,15 @@ while exitflag<=0 & randattempt<100;
 
 
         if exist('sqrtyuncorr') & ~isempty(sqrtyuncorr)
-            [fitparams,fval,exitflag] = fminsearch(@SqrtGaborFitSSD2,guessparams,options,xx,sqrtyy,sqrtyuncorr,maxamp,maxfreq,minoffset,maxoffset);
+            [fitparams,fval,exitflag] = fminsearch(@SqrtGaborFitSSD2,guessparams,options,xx,sqrtyy,sqrtyuncorr,maxamp,maxfreq,minoffset,maxoffset,flag);
         else
-            [fitparams,fval,exitflag] = fminsearch(@SqrtGaborFitSSD2,guessparams,options,xx,sqrtyy,[],maxamp,maxfreq,minoffset,maxoffset);
+            [fitparams,fval,exitflag] = fminsearch(@SqrtGaborFitSSD2,guessparams,options,xx,sqrtyy,[],maxamp,maxfreq,minoffset,maxoffset,flag);
         end
         if exitflag<=0 % try again
             if exist('sqrtyuncorr') & ~isempty(sqrtyuncorr)
-                [fitparams,fval,exitflag] = fminsearch(@SqrtGaborFitSSD2,fitparams,options,xx,sqrtyy,sqrtyuncorr,maxamp,maxfreq,minoffset,maxoffset);
+                [fitparams,fval,exitflag] = fminsearch(@SqrtGaborFitSSD2,fitparams,options,xx,sqrtyy,sqrtyuncorr,maxamp,maxfreq,minoffset,maxoffset,flag);
             else
-                [fitparams,fval,exitflag] = fminsearch(@SqrtGaborFitSSD2,fitparams,options,xx,sqrtyy,[],maxamp,maxfreq,minoffset,maxoffset);
+                [fitparams,fval,exitflag] = fminsearch(@SqrtGaborFitSSD2,fitparams,options,xx,sqrtyy,[],maxamp,maxfreq,minoffset,maxoffset,flag);
             end
         end
 
