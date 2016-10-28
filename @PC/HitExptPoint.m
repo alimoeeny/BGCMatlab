@@ -1,0 +1,1 @@
+function HitExptPoint(a,b, ex, cell)DATA = GetDataFromFig(a);exname = setdiff(unique(DATA.expnames),'');fprintf('%s(%d)  Cell %d\n',exname{ex},ex,cell);PC.SetFigure(DATA,DATA.tag.rateseq);PC.PlotClusterRates(DATA, 'rateseqone','expt',exname{ex},'cell',cell,'nomu');%RateZoom(DATA,5,cell);
