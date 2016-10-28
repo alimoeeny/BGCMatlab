@@ -1,0 +1,1 @@
+function xc = ShapeCorr(P,Q)if isfield(P,'MeanSpike') && isfield(Q,'MeanSpike')    xc = corrcoef(P.MeanSpike.ms(:),Q.MeanSpike.ms(:));    xc = xc(1,2);else    xc = NaN;end

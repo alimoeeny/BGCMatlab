@@ -1,0 +1,65 @@
+function fit = SetFit(fit, type, varargin)
+%fit AllV.SetFit(fit, type) modifies the fit struct to reflect alternate
+%fits...
+%AllV.SetFit(fit,'slim') uses clusters that have been combined if
+% there were too clse
+%see also AllV.CombineFits
+
+if iscell(fit) 
+    fits = fit;
+    if strcmp(type,'consensus');
+        for j = 1:length(fits)
+        end
+    end
+end
+if ~isfield(fit,'alternates')
+    return;
+end
+
+
+for j = 1:length(fit.alternates)
+    if isfield(fit.alternates{j},'type') && strcmp(fit.alternates{j}.type,type)
+        fit = FixFit(fit, fit.alternates{j});
+        fit.alternateid = j;
+    end
+end
+
+
+
+
+function sfit = FixFit(fit, fix)
+sfit = fit;
+if isfield(fix,'substitutions')
+   for j = 1:size(fix.substitutions,1) 
+       a = fix.substitutions(j,:);
+       sfit.clst(sfit.clst == a(1)) = a(2);
+   end
+   cls = unique(fit.clst);
+   sls = unique(sfit.clst);
+   id = find(ismember(cls,sls));
+   sfit.D = MatrixPermute(fit.D,id);
+   if isfield(fit,'nearD')
+       sfit.D = MatrixPermute(fit.nearD,id);
+   end
+   if isfield(fit,'SU')
+       sfit.SU = fit.SU(id);
+   end
+   if isfield(fix,'isolation')
+       sfit.isolation = fix.isolation;
+   else
+       sfit.isolation = fit.isolation(id,:);
+   end
+elseif isfield(fix,'clst')
+    sfit.clst = fix.clst;
+   if isfield(fix,'isolation')
+       sfit.isolation = fix.isolation;
+   end
+   if isfield(fix,'nocluster')
+       sfit.clst(sfit.clst == fix.nocluster) = 1;
+   end
+end
+
+   sfit = rmfields(sfit,'ellipse');
+   if isfield(fix,'ellipse')
+       sfit.ellipse = fix.ellipse;
+   end

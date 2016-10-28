@@ -1,0 +1,1 @@
+function c = TrialMarkChar(T)c = '';if isfield(T,'Result') && (isempty(T.Result) ||T.Result == 0)    c = '*';end        
